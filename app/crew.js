@@ -1,5 +1,6 @@
 import { router } from "expo-router";
 import {
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,10 +12,17 @@ import { useAuth } from "../src/auth/AuthContext";
 import LogoutButton from "../src/components/LogoutButton";
 import Notice from "../src/components/Notice";
 import PrimaryButton from "../src/components/PrimaryButton";
+import ProfileButton from "../src/components/ProfileButton";
 import ScreenFrame from "../src/components/ScreenFrame";
 import { colors, spacing } from "../src/theme/tokens";
 
-const modules = ["POS", "Stok", "Permintaan stok", "Waste"];
+const modules = [
+  { name: "POS", route: ROUTES.crewPos },
+  { name: "Riwayat Transaksi", route: ROUTES.crewOrders },
+  { name: "Stok", route: ROUTES.inventory },
+  { name: "Permintaan stok", route: ROUTES.stockRequests },
+  { name: "Waste", route: ROUTES.waste },
+];
 
 export default function CrewScreen() {
   const { user, selection, notice } = useAuth();
@@ -42,19 +50,23 @@ export default function CrewScreen() {
 
             <View style={styles.moduleList}>
               <Text style={styles.sectionTitle}>Navigasi operasional</Text>
-              {modules.map((moduleName) => (
-                <View
-                  key={moduleName}
+              {modules.map((module) => (
+                <Pressable
+                  key={module.name}
+                  accessibilityRole={module.route ? "button" : undefined}
+                  disabled={!module.route}
+                  onPress={() => module.route && router.push(module.route)}
                   style={[
                     styles.moduleRow,
-                    moduleName === "POS" && styles.currentModule,
+                    module.name === "POS" && styles.currentModule,
+                    !module.route && styles.disabledModule,
                   ]}
                 >
-                  <Text style={styles.moduleName}>{moduleName}</Text>
-                  {moduleName !== "POS" ? (
+                  <Text style={styles.moduleName}>{module.name}</Text>
+                  {!module.route ? (
                     <Text style={styles.moduleStatus}>Dalam Pengembangan</Text>
                   ) : null}
-                </View>
+                </Pressable>
               ))}
             </View>
 
@@ -65,6 +77,7 @@ export default function CrewScreen() {
                 onPress={() => router.push(ROUTES.selectOutlet)}
               />
             ) : null}
+            <ProfileButton />
             <Notice message={notice} type="info" />
             <LogoutButton />
           </View>
@@ -187,6 +200,9 @@ const styles = StyleSheet.create({
   moduleStatus: {
     color: colors.textSecondary,
     fontSize: 12,
+  },
+  disabledModule: {
+    opacity: 0.7,
   },
   posEyebrow: {
     color: colors.textSecondary,

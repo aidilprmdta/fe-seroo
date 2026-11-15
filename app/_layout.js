@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { AuthProvider, useAuth } from "../src/auth/AuthContext";
+import AutoLockGate from "../src/auth/AutoLockGate";
 import {
   isAllowedRoute,
   resolveLandingRoute,
@@ -11,9 +12,11 @@ function GuardedStack() {
   const memberships = user?.memberships ?? [];
   const landingRoute = resolveLandingRoute(memberships, selection);
   const authenticated = status === "authenticated";
+  const passwordChangeRequired = user?.mustChangePassword === true;
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <AutoLockGate>
+      <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
 
       <Stack.Protected
@@ -27,47 +30,108 @@ function GuardedStack() {
         guard={authenticated}
         redirectTo="/"
       >
-        <Stack.Protected
-          guard={isAllowedRoute(ROUTES.selectOutlet, memberships, selection)}
-          redirectTo={landingRoute}
-        >
-          <Stack.Screen name="select-outlet" />
-        </Stack.Protected>
+        <Stack.Screen name="profile" />
 
         <Stack.Protected
-          guard={isAllowedRoute(
-            ROUTES.accessPending,
-            memberships,
-            selection,
-          )}
-          redirectTo={landingRoute}
+          guard={!passwordChangeRequired}
+          redirectTo={ROUTES.profile}
         >
-          <Stack.Screen name="access-pending" />
-        </Stack.Protected>
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.selectOutlet, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="select-outlet" />
+          </Stack.Protected>
 
-        <Stack.Protected
-          guard={isAllowedRoute(ROUTES.crew, memberships, selection)}
-          redirectTo={landingRoute}
-        >
-          <Stack.Screen name="crew" />
-          <Stack.Screen name="crew/pos" />
-        </Stack.Protected>
+          <Stack.Protected
+            guard={isAllowedRoute(
+              ROUTES.accessPending,
+              memberships,
+              selection,
+            )}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="access-pending" />
+          </Stack.Protected>
 
-        <Stack.Protected
-          guard={isAllowedRoute(ROUTES.manager, memberships, selection)}
-          redirectTo={landingRoute}
-        >
-          <Stack.Screen name="manager/dashboard" />
-        </Stack.Protected>
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.crew, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="crew" />
+            <Stack.Screen name="crew/pos" />
+            <Stack.Screen name="crew/orders" />
+          </Stack.Protected>
 
-        <Stack.Protected
-          guard={isAllowedRoute(ROUTES.owner, memberships, selection)}
-          redirectTo={landingRoute}
-        >
-          <Stack.Screen name="owner/dashboard" />
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.inventory, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="inventory" />
+            <Stack.Screen name="waste" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(
+              ROUTES.stockRequests,
+              memberships,
+              selection,
+            )}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="stock-requests" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(
+              ROUTES.adminCatalog,
+              memberships,
+              selection,
+            )}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="admin/catalog" />
+            <Stack.Screen name="admin/accounts" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.manager, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="manager/dashboard" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.owner, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="owner/dashboard" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.expenses, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="expenses" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.reports, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="reports" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.closings, memberships, selection)}
+            redirectTo={landingRoute}
+          >
+            <Stack.Screen name="closings" />
+          </Stack.Protected>
         </Stack.Protected>
       </Stack.Protected>
-    </Stack>
+      </Stack>
+    </AutoLockGate>
   );
 }
 

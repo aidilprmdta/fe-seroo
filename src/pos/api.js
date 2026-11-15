@@ -65,7 +65,7 @@ function assertOrderResult(data) {
     typeof order.orderNumber !== "string" ||
     typeof order.total !== "string" ||
     !Array.isArray(order.items) ||
-    typeof data.replayed !== "boolean"
+    (data.replayed !== undefined && typeof data.replayed !== "boolean")
   ) {
     throw invalidResponse();
   }
@@ -84,6 +84,66 @@ export function createPosApi({ request }) {
       const data = await request(
         `/api/v1/outlets/${encodeURIComponent(outletId)}/orders`,
         { method: "POST", body: payload },
+      );
+      return assertOrderResult(data);
+    },
+    async verifyQris(outletId, orderId, { notes } = {}) {
+      const data = await request(
+        `/api/v1/outlets/${encodeURIComponent(outletId)}/orders/${encodeURIComponent(orderId)}/verify-qris`,
+        {
+          method: "POST",
+          body: notes ? { notes } : {},
+        },
+      );
+      return assertOrderResult(data);
+    },
+    async listOrders(
+      outletId,
+      { paymentStatus, status, page = 1, pageSize = 20, limit } = {},
+    ) {
+      const params = new URLSearchParams();
+      if (paymentStatus) params.append("paymentStatus", paymentStatus);
+      if (status) params.append("status", status);
+      if (limit !== undefined) {
+        params.append("limit", limit.toString());
+      } else {
+        params.append("page", page.toString());
+        params.append("pageSize", pageSize.toString());
+      }
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const data = await request(
+        `/api/v1/outlets/${encodeURIComponent(outletId)}/orders${query}`,
+      );
+      if (
+        !data ||
+        !Array.isArray(data.orders) ||
+        !data.pagination ||
+        typeof data.pagination.page !== "number" ||
+        typeof data.pagination.pageSize !== "number" ||
+        typeof data.pagination.hasNextPage !== "boolean"
+      ) {
+        throw invalidResponse();
+      }
+      return data;
+    },
+    async getOrder(outletId, orderId) {
+      const data = await request(
+        `/api/v1/outlets/${encodeURIComponent(outletId)}/orders/${encodeURIComponent(orderId)}`,
+      );
+      return assertOrderResult(data);
+    },
+    async cancelOrder(outletId, orderId, { reason, recordWaste = true, notes } = {}) {
+      const body = {
+        reason,
+        recordWaste: Boolean(recordWaste),
+        ...(notes ? { notes } : {}),
+      };
+      const data = await request(
+        `/api/v1/outlets/${encodeURIComponent(outletId)}/orders/${encodeURIComponent(orderId)}/cancel`,
+        {
+          method: "POST",
+          body,
+        },
       );
       return assertOrderResult(data);
     },

@@ -3,10 +3,12 @@ import * as Crypto from "expo-crypto";
 import * as Network from "expo-network";
 import { router } from "expo-router";
 import {
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -57,16 +59,87 @@ export default function PosScreen() {
   const [addOnQuantities, setAddOnQuantities] = useState({});
   const [builderQuantity, setBuilderQuantity] = useState(1);
   const [cart, setCart] = useState([]);
+  const [paymentMode, setPaymentMode] = useState("SINGLE"); // "SINGLE" | "SPLIT"
   const [paymentMethod, setPaymentMethod] = useState("CASH");
+  const [splitCash, setSplitCash] = useState("");
+  const [splitQris, setSplitQris] = useState("");
   const [records, setRecords] = useState([]);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [verifyingId, setVerifyingId] = useState(null);
+  const [cancellingRecord, setCancellingRecord] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelRecordWaste, setCancelRecordWaste] = useState(true);
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [receiptOrder, setReceiptOrder] = useState(null);
   const syncingRef = useRef(false);
   const submittingRef = useRef(false);
   const onlineRef = useRef(false);
   const wideLayout = width >= 900;
+
+  const handleVerifyQris = async (record) => {
+    if (!record.serverOrder?.id || verifyingId) return;
+    setVerifyingId(record.serverOrder.id);
+    setError(null);
+    try {
+      const result = await api.verifyQris(outletId, record.serverOrder.id);
+      await posOutbox.setStatus({
+        clientTransactionId: record.clientTransactionId,
+        ownerUserId: user.id,
+        outletId,
+        status: "synced",
+        serverOrder: result.order,
+      });
+      await refreshRecords();
+      setNotice(
+        `Pembayaran QRIS No. ${record.serverOrder.orderNumber} berhasil diverifikasi (Lunas).`,
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!cancellingRecord?.serverOrder?.id || cancelSubmitting) return;
+    if (cancelReason.trim().length < 5) {
+      setError("Alasan pembatalan minimal 5 karakter.");
+      return;
+    }
+    setCancelSubmitting(true);
+    setError(null);
+    try {
+      const result = await api.cancelOrder(
+        outletId,
+        cancellingRecord.serverOrder.id,
+        {
+          reason: cancelReason.trim(),
+          recordWaste: cancelRecordWaste,
+        },
+      );
+      await posOutbox.setStatus({
+        clientTransactionId: cancellingRecord.clientTransactionId,
+        ownerUserId: user.id,
+        outletId,
+        status: "synced",
+        serverOrder: result.order,
+      });
+      await refreshRecords();
+      setCancellingRecord(null);
+      setCancelReason("");
+      setCancelRecordWaste(true);
+      setNotice(
+        `Pesanan No. ${result.order.orderNumber} berhasil dibatalkan (${cancelRecordWaste ? "dicatat waste" : "stok dikembalikan"}).`,
+      );
+    } catch (err) {
+      setError(err.message || "Gagal membatalkan pesanan.");
+    } finally {
+      setCancelSubmitting(false);
+    }
+  };
 
   const refreshRecords = useCallback(async () => {
     await posOutbox.initialize();
@@ -128,6 +201,7 @@ export default function PosScreen() {
             status: "synced",
             serverOrder: result.order,
           });
+          setReceiptOrder(result.order);
         } catch (syncError) {
           const status = classifyOutboxFailure(syncError);
           await posOutbox.setStatus({
@@ -314,9 +388,40 @@ export default function PosScreen() {
       onlineRef.current = online;
       setNetworkAvailable(online);
 
+      let orderPayments = undefined;
+      let orderPaymentMethod = paymentMethod;
+
+      if (paymentMode === "SPLIT") {
+        const cartTotalRupiah = cartTotal / 100;
+        const splitCashNum = Number(splitCash) || 0;
+        const splitQrisNum = Number(splitQris) || 0;
+        const splitTotalPaid = splitCashNum + splitQrisNum;
+        const splitDiff = splitTotalPaid - cartTotalRupiah;
+
+        if (splitCashNum <= 0 || splitQrisNum <= 0 || splitDiff !== 0) {
+          setError(
+            `Total pembayaran (Rp ${splitTotalPaid.toLocaleString("id-ID")}) harus sama dengan total tagihan (Rp ${cartTotalRupiah.toLocaleString("id-ID")}). ${
+              splitDiff < 0
+                ? `Kurang Rp ${Math.abs(splitDiff).toLocaleString("id-ID")}. Status: belum lunas.`
+                : `Lebih Rp ${splitDiff.toLocaleString("id-ID")}.`
+            }`,
+          );
+          submittingRef.current = false;
+          setSubmitting(false);
+          return;
+        }
+
+        orderPaymentMethod = "SPLIT";
+        orderPayments = [
+          { paymentMethod: "CASH", amount: splitCashNum.toFixed(2) },
+          { paymentMethod: "QRIS", amount: splitQrisNum.toFixed(2) },
+        ];
+      }
+
       const payload = buildOrderPayload({
         clientTransactionId: Crypto.randomUUID(),
-        paymentMethod,
+        paymentMethod: orderPaymentMethod,
+        payments: orderPayments,
         recordedOffline: !online,
         cart,
       });
@@ -327,13 +432,21 @@ export default function PosScreen() {
       });
       setCart([]);
       setAddOnQuantities({});
+      setSplitCash("");
+      setSplitQris("");
+      setPaymentMode("SINGLE");
       await refreshRecords();
 
       if (online) {
         await syncPending();
+        if (orderPaymentMethod === "QRIS" || orderPaymentMethod === "SPLIT") {
+          setNotice(
+            "Transaksi berhasil dikirim. Pembayaran QRIS belum terverifikasi (periksa mutasi merchant sebelum menandai verifikasi).",
+          );
+        }
       } else {
         setNotice(
-          paymentMethod === "QRIS"
+          orderPaymentMethod === "QRIS" || orderPaymentMethod === "SPLIT"
             ? "Transaksi disimpan di perangkat, belum dikirim. QRIS belum terverifikasi."
             : "Transaksi disimpan di perangkat, belum dikirim ke server.",
         );
@@ -605,23 +718,115 @@ export default function PosScreen() {
             <View style={styles.checkout}>
               <Text style={styles.label}>Metode pembayaran</Text>
               <View style={styles.paymentRow}>
-                {["CASH", "QRIS"].map((method) => (
-                  <Pressable
-                    key={method}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: paymentMethod === method }}
-                    onPress={() => setPaymentMethod(method)}
-                    style={[
-                      styles.paymentButton,
-                      paymentMethod === method && styles.selectedOption,
-                    ]}
-                  >
-                    <Text style={styles.optionName}>
-                      {method === "CASH" ? "Cash" : "QRIS"}
-                    </Text>
-                  </Pressable>
-                ))}
+                {[
+                  { key: "CASH", label: "Cash" },
+                  { key: "QRIS", label: "QRIS" },
+                  { key: "SPLIT", label: "Split" },
+                ].map((opt) => {
+                  const isActive =
+                    opt.key === "SPLIT"
+                      ? paymentMode === "SPLIT"
+                      : paymentMode === "SINGLE" && paymentMethod === opt.key;
+                  return (
+                    <Pressable
+                      key={opt.key}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: isActive }}
+                      accessibilityLabel={
+                        opt.key === "SPLIT"
+                          ? "Split: bayar sebagian Cash sebagian QRIS"
+                          : `Bayar dengan ${opt.label}`
+                      }
+                      onPress={() => {
+                        if (opt.key === "SPLIT") {
+                          setPaymentMode("SPLIT");
+                          setSplitCash("");
+                          setSplitQris("");
+                        } else {
+                          setPaymentMode("SINGLE");
+                          setPaymentMethod(opt.key);
+                          setSplitCash("");
+                          setSplitQris("");
+                        }
+                      }}
+                      style={[
+                        styles.paymentButton,
+                        isActive && styles.selectedOption,
+                      ]}
+                    >
+                      <Text style={styles.optionName}>{opt.label}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
+
+              {paymentMode === "SPLIT" ? (() => {
+                const cartTotalRupiah = cartTotal / 100;
+                const cashNum = Number(splitCash) || 0;
+                const qrisNum = Number(splitQris) || 0;
+                const paid = cashNum + qrisNum;
+                const diff = paid - cartTotalRupiah;
+                const isExact = cashNum > 0 && qrisNum > 0 && diff === 0;
+                const diffLabel =
+                  cashNum > 0 && qrisNum > 0
+                    ? diff < 0
+                      ? `Kurang Rp ${Math.abs(diff).toLocaleString("id-ID")} · belum lunas`
+                      : diff > 0
+                        ? `Lebih Rp ${diff.toLocaleString("id-ID")}`
+                        : "✓ Lunas"
+                    : null;
+
+                return (
+                  <View style={styles.splitPanel}>
+                    <View style={styles.splitField}>
+                      <Text style={styles.label}>Cash (Rp)</Text>
+                      <TextInput
+                        style={styles.splitInput}
+                        keyboardType="numeric"
+                        returnKeyType="next"
+                        placeholder="0"
+                        placeholderTextColor={colors.textSecondary}
+                        value={splitCash}
+                        onChangeText={(text) =>
+                          setSplitCash(text.replace(/[^0-9]/g, ""))
+                        }
+                        accessibilityLabel="Nominal Cash untuk split payment"
+                      />
+                    </View>
+                    <View style={styles.splitField}>
+                      <Text style={styles.label}>QRIS (Rp)</Text>
+                      <TextInput
+                        style={styles.splitInput}
+                        keyboardType="numeric"
+                        returnKeyType="done"
+                        placeholder="0"
+                        placeholderTextColor={colors.textSecondary}
+                        value={splitQris}
+                        onChangeText={(text) =>
+                          setSplitQris(text.replace(/[^0-9]/g, ""))
+                        }
+                        accessibilityLabel="Nominal QRIS untuk split payment"
+                      />
+                    </View>
+                    {diffLabel ? (
+                      <Text
+                        style={[
+                          styles.splitStatus,
+                          isExact
+                            ? styles.splitStatusOk
+                            : styles.splitStatusErr,
+                        ]}
+                      >
+                        {diffLabel}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.helper}>
+                      QRIS belum terverifikasi sebagai bukti settlement.
+                    </Text>
+                  </View>
+                );
+              })() : null}
+
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Perkiraan total</Text>
                 <Text style={styles.totalValue}>{formatMoney(cartTotal)}</Text>
@@ -629,7 +834,7 @@ export default function PosScreen() {
               <Text style={styles.helper}>
                 Total final dihitung dan dikonfirmasi oleh server.
               </Text>
-              {paymentMethod === "QRIS" ? (
+              {paymentMode === "SINGLE" && paymentMethod === "QRIS" ? (
                 <Text style={styles.helper}>
                   QRIS hanya dicatat sebagai metode pembayaran, bukan bukti
                   settlement.
@@ -638,7 +843,11 @@ export default function PosScreen() {
               <PrimaryButton
                 label="Simpan transaksi"
                 onPress={submitOrder}
-                disabled={cart.length === 0}
+                disabled={
+                  cart.length === 0 ||
+                  (paymentMode === "SPLIT" &&
+                    (Number(splitCash) <= 0 || Number(splitQris) <= 0))
+                }
                 loading={submitting}
               />
             </View>
@@ -675,14 +884,204 @@ export default function PosScreen() {
               >
                 <Text style={styles.recordStatus}>{orderSyncLabel(record)}</Text>
                 <Text style={styles.recordSummary}>{recordSummary(record)}</Text>
+                {record.serverOrder ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setReceiptOrder(record.serverOrder)}
+                    style={styles.receiptButton}
+                  >
+                    <Text style={styles.receiptButtonText}>Lihat struk</Text>
+                  </Pressable>
+                ) : null}
                 {record.errorCode ? (
                   <Text style={styles.helper}>Kode: {record.errorCode}</Text>
+                ) : null}
+
+                {record.serverOrder?.paymentStatus === "PENDING_RECONCILIATION" ? (
+                  <View style={styles.verifyActionGroup}>
+                    <Text style={styles.pendingQrisBadge}>
+                      ⚠️ QRIS Belum Verifikasi
+                    </Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Verifikasi pembayaran QRIS transaksi ${record.serverOrder.orderNumber}`}
+                      onPress={() => handleVerifyQris(record)}
+                      disabled={verifyingId === record.serverOrder.id}
+                      style={[
+                        styles.verifyButton,
+                        verifyingId === record.serverOrder.id &&
+                          styles.verifyButtonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.verifyButtonText}>
+                        {verifyingId === record.serverOrder.id
+                          ? "Memverifikasi..."
+                          : "Tandai Terverifikasi"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : record.serverOrder?.verifiedAt ? (
+                  <Text style={styles.verifiedBadge}>✓ QRIS Terverifikasi</Text>
+                ) : null}
+
+                {record.serverOrder?.status === "CANCELLED" ? (
+                  <View style={styles.cancelledBadgeBox}>
+                    <Text style={styles.cancelledBadge}>🔴 Dibatalkan</Text>
+                    {record.serverOrder.cancellationReason ? (
+                      <Text style={styles.cancelledReasonText} numberOfLines={2}>
+                        {record.serverOrder.cancellationReason}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : record.serverOrder ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Batalkan pesanan ${record.serverOrder.orderNumber}`}
+                    onPress={() => {
+                      setCancellingRecord(record);
+                      setCancelReason("");
+                      setCancelRecordWaste(true);
+                    }}
+                    style={styles.cancelOrderButton}
+                  >
+                    <Text style={styles.cancelOrderButtonText}>Batalkan Pesanan</Text>
+                  </Pressable>
                 ) : null}
               </View>
             ))}
           </ScrollView>
         )}
       </View>
+
+      <Modal
+        visible={Boolean(receiptOrder)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReceiptOrder(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.receiptCard}>
+            <Text style={styles.receiptBrand}>Teh Tarik Seroo</Text>
+            <Text style={styles.receiptTitle}>Struk Transaksi</Text>
+            <Text style={styles.receiptMeta}>No. {receiptOrder?.orderNumber}</Text>
+            <Text style={styles.receiptMeta}>{receiptOrder?.createdAt ?? "-"}</Text>
+            <View style={styles.receiptDivider} />
+            {(receiptOrder?.items ?? []).map((item) => (
+              <View key={item.id} style={styles.receiptLine}>
+                <Text style={styles.receiptItem}>
+                  {item.productName} · {item.variantName} x{item.quantity}
+                </Text>
+                <Text style={styles.receiptAmount}>{formatMoney(toMinorUnits(item.subtotal))}</Text>
+              </View>
+            ))}
+            <View style={styles.receiptDivider} />
+            <View style={styles.receiptTotalRow}>
+              <Text style={styles.receiptTotalLabel}>Total</Text>
+              <Text style={styles.receiptTotal}>{formatMoney(toMinorUnits(receiptOrder?.total))}</Text>
+            </View>
+            <Text style={styles.receiptMeta}>
+              Pembayaran: {receiptOrder?.paymentMethod ?? "-"}
+            </Text>
+            {receiptOrder?.paymentStatus === "PENDING_RECONCILIATION" ? (
+              <Text style={styles.receiptWarning}>QRIS belum terverifikasi</Text>
+            ) : null}
+            <PrimaryButton label="Tutup" secondary onPress={() => setReceiptOrder(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(cancellingRecord)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCancellingRecord(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              Batalkan Pesanan #{cancellingRecord?.serverOrder?.orderNumber}
+            </Text>
+            <Text style={styles.modalSubtitle}>
+              Transaksi akan ditandai CANCELLED dan status pembayaran menjadi REFUNDED.
+            </Text>
+
+            <Text style={styles.inputLabel}>Alasan Pembatalan (min. 5 karakter):</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Contoh: Pelanggan membatalkan pesanan"
+              placeholderTextColor={colors.muted}
+              value={cancelReason}
+              onChangeText={setCancelReason}
+              multiline
+              maxLength={255}
+            />
+
+            <Text style={styles.inputLabel}>Status Minuman:</Text>
+            <View style={styles.wasteToggleRow}>
+              <Pressable
+                onPress={() => setCancelRecordWaste(true)}
+                style={[
+                  styles.wasteOptionBtn,
+                  cancelRecordWaste && styles.wasteOptionBtnActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.wasteOptionText,
+                    cancelRecordWaste && styles.wasteOptionTextActive,
+                  ]}
+                >
+                  🗑️ Minuman Sudah Dibuat (Catat Waste)
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setCancelRecordWaste(false)}
+                style={[
+                  styles.wasteOptionBtn,
+                  !cancelRecordWaste && styles.wasteOptionBtnActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.wasteOptionText,
+                    !cancelRecordWaste && styles.wasteOptionTextActive,
+                  ]}
+                >
+                  ↩️ Belum Dibuat (Kembalikan Stok Bahan)
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setCancellingRecord(null);
+                  setCancelReason("");
+                }}
+                disabled={cancelSubmitting}
+              >
+                <Text style={styles.modalCancelBtnText}>Tutup</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.modalConfirmBtn,
+                  (cancelReason.trim().length < 5 || cancelSubmitting) &&
+                    styles.modalConfirmBtnDisabled,
+                ]}
+                onPress={handleCancelOrder}
+                disabled={cancelReason.trim().length < 5 || cancelSubmitting}
+              >
+                <Text style={styles.modalConfirmBtnText}>
+                  {cancelSubmitting ? "Memproses..." : "Konfirmasi Batal"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScreenFrame>
   );
 }
@@ -985,6 +1384,39 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
   },
+  splitPanel: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  splitField: {
+    gap: spacing.xs,
+  },
+  splitInput: {
+    minHeight: 52,
+    paddingHorizontal: spacing.md,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  splitStatus: {
+    fontSize: 14,
+    fontWeight: "700",
+    paddingTop: spacing.xs,
+  },
+  splitStatusOk: {
+    color: colors.success ?? "#2d6a4f",
+  },
+  splitStatusErr: {
+    color: colors.danger,
+  },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1018,8 +1450,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   recordCard: {
-    width: 260,
-    minHeight: 84,
+    width: 280,
+    minHeight: 96,
     justifyContent: "center",
     gap: spacing.xs,
     padding: spacing.md,
@@ -1027,6 +1459,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  verifyActionGroup: {
+    gap: 4,
+    marginTop: 4,
+  },
+  pendingQrisBadge: {
+    color: colors.warning ?? "#b08968",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  verifyButton: {
+    minHeight: 40,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: 6,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  verifyButtonDisabled: {
+    opacity: 0.6,
+  },
+  verifyButtonText: {
+    color: colors.surface,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  verifiedBadge: {
+    color: colors.success ?? "#2d6a4f",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
   },
   recordStatus: {
     color: colors.textPrimary,
@@ -1036,5 +1499,194 @@ const styles = StyleSheet.create({
   recordSummary: {
     color: colors.textSecondary,
     fontSize: 13,
+  },
+  receiptButton: {
+    minHeight: 34,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  receiptButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  cancelOrderButton: {
+    minHeight: 36,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: "#fff0f0",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#f5c2c2",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  cancelOrderButtonText: {
+    color: colors.danger ?? "#b91c1c",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  cancelledBadgeBox: {
+    marginTop: 4,
+    padding: 6,
+    backgroundColor: "#fff0f0",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#f5c2c2",
+  },
+  cancelledBadge: {
+    color: colors.danger ?? "#b91c1c",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  cancelledReasonText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.md,
+  },
+  receiptCard: {
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  receiptBrand: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  receiptTitle: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: "center",
+  },
+  receiptMeta: {
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  receiptDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
+  },
+  receiptLine: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  receiptItem: { flex: 1, color: colors.textPrimary, fontSize: 13 },
+  receiptAmount: { color: colors.textPrimary, fontSize: 13, fontWeight: "600" },
+  receiptTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  receiptTotalLabel: { color: colors.textPrimary, fontSize: 16, fontWeight: "800" },
+  receiptTotal: { color: colors.textPrimary, fontSize: 16, fontWeight: "800" },
+  receiptWarning: { color: colors.warning ?? "#B45309", fontSize: 13, fontWeight: "700" },
+  modalCard: {
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textPrimary,
+    marginTop: 4,
+  },
+  modalInput: {
+    minHeight: 64,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: spacing.sm,
+    fontSize: 14,
+    color: colors.textPrimary,
+    textAlignVertical: "top",
+  },
+  wasteToggleRow: {
+    gap: 8,
+  },
+  wasteOptionBtn: {
+    padding: spacing.sm,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  wasteOptionBtnActive: {
+    borderColor: colors.primary,
+    backgroundColor: "#f4f9f6",
+  },
+  wasteOptionText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  wasteOptionTextActive: {
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  modalCancelBtn: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalCancelBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+  modalConfirmBtn: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.danger ?? "#b91c1c",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 8,
+  },
+  modalConfirmBtnDisabled: {
+    opacity: 0.5,
+  },
+  modalConfirmBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#ffffff",
   },
 });

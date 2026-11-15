@@ -116,6 +116,20 @@ export function createSqliteRepository(openDatabaseAsync) {
       return rows.map(mapRow);
     },
 
+    async markNeedsReview({ ownerUserId }) {
+      const database = await getDatabase();
+      const result = await database.runAsync(
+        `UPDATE pos_order_outbox
+         SET status = 'needs_review', error_code = ?, next_retry_at = NULL,
+             updated_at = ?
+         WHERE owner_user_id = ? AND status IN ('queued', 'syncing', 'retryable_failure')`,
+        "SESSION_ENDED_REVIEW",
+        new Date().toISOString(),
+        ownerUserId,
+      );
+      return result.changes ?? 0;
+    },
+
     async update(record) {
       const database = await getDatabase();
       const result = await database.runAsync(

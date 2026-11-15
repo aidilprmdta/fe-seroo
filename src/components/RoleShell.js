@@ -11,6 +11,7 @@ import { colors, spacing } from "../theme/tokens";
 import LogoutButton from "./LogoutButton";
 import Notice from "./Notice";
 import PrimaryButton from "./PrimaryButton";
+import ProfileButton from "./ProfileButton";
 import ScreenFrame from "./ScreenFrame";
 
 export default function RoleShell({
@@ -18,6 +19,7 @@ export default function RoleShell({
   role,
   emptyState,
   readOnly = false,
+  actions = [],
 }) {
   const { user, selection, notice } = useAuth();
   const memberships = user.memberships;
@@ -65,8 +67,22 @@ export default function RoleShell({
           <Text style={styles.emptyText}>{emptyState}</Text>
         </View>
 
+        {actions.length ? (
+          <View style={styles.actions}>
+            {actions.map((action) => (
+              <PrimaryButton
+                key={action.label}
+                label={action.label}
+                onPress={action.onPress}
+                secondary={action.secondary}
+              />
+            ))}
+          </View>
+        ) : null}
+
         <Notice message={notice} type="info" />
         <View style={styles.footer}>
+          <ProfileButton />
           <LogoutButton />
         </View>
       </ScrollView>
@@ -161,6 +177,14 @@ const styles = StyleSheet.create({
     lineHeight: 23,
   },
   footer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
   },
 });

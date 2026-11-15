@@ -26,13 +26,13 @@ export function calculateCartTotalMinor(cart) {
 export function buildOrderPayload({
   clientTransactionId,
   paymentMethod,
+  payments,
   recordedOffline,
   cart,
 }) {
-  return {
+  const payload = {
     clientTransactionId,
     recordedOffline,
-    paymentMethod,
     items: cart.map((item) => ({
       productVariantId: item.productVariantId,
       quantity: item.quantity,
@@ -44,6 +44,15 @@ export function buildOrderPayload({
       })),
     })),
   };
+
+  if (Array.isArray(payments) && payments.length > 0) {
+    payload.payments = payments;
+    payload.paymentMethod = payments.length > 1 ? "SPLIT" : payments[0].paymentMethod;
+  } else {
+    payload.paymentMethod = paymentMethod || "CASH";
+  }
+
+  return payload;
 }
 
 export function formatMoney(minorUnits) {

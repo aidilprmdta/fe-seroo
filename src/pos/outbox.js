@@ -70,6 +70,14 @@ export function createPosOutbox(repository, now = () => new Date()) {
       return records.map(parseRecord);
     },
 
+    async markNeedsReview({ ownerUserId }) {
+      if (typeof ownerUserId !== "string") {
+        throw new Error("Pemilik antrean POS tidak valid.");
+      }
+      if (!repository.markNeedsReview) return 0;
+      return repository.markNeedsReview({ ownerUserId });
+    },
+
     async listPending({ ownerUserId, outletId, force = false }) {
       const records = await repository.list({ ownerUserId, outletId });
       return records

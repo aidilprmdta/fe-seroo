@@ -13,6 +13,7 @@ import {
   getInitialOutletContext,
   getSelectedMembership,
 } from "./routePolicy";
+import { markSessionOutboxesForReview } from "./sessionCleanup";
 
 const AuthContext = createContext(null);
 
@@ -114,6 +115,8 @@ export function AuthProvider({ children }) {
   }, [client]);
 
   const logout = useCallback(async () => {
+    const ownerUserId = stateRef.current.user?.id;
+    await markSessionOutboxesForReview(ownerUserId);
     try {
       const result = await client.logout();
       setState({
@@ -129,6 +132,22 @@ export function AuthProvider({ children }) {
       return { serverConfirmed: false, notice: error.message };
     }
   }, [client]);
+
+  const changePassword = useCallback(
+    async (credentials) => {
+      const result = await client.changePassword(credentials);
+      setState((current) =>
+        current.status === "authenticated"
+          ? {
+              ...current,
+              user: { ...current.user, mustChangePassword: false },
+            }
+          : current,
+      );
+      return result;
+    },
+    [client],
+  );
 
   const selectOutlet = useCallback((outletId) => {
     const current = stateRef.current;
@@ -152,23 +171,43 @@ export function AuthProvider({ children }) {
     setState((current) => ({ ...current, notice: null }));
   }, []);
 
+  const lockForInactivity = useCallback(() => {
+    setState((current) =>
+      current.status === "authenticated"
+        ? { ...current, locked: true, notice: "Layar dikunci karena tidak ada aktivitas." }
+        : current,
+    );
+  }, []);
+
+  const unlockWithLogin = useCallback(() => {
+    setState((current) =>
+      current.status === "authenticated" ? { ...current, locked: false } : current,
+    );
+  }, []);
+
   const value = useMemo(
     () => ({
       ...state,
       login,
       logout,
+      changePassword,
       retryRestore,
       selectOutlet,
       dismissNotice,
+      lockForInactivity,
+      unlockWithLogin,
       apiRequest,
     }),
     [
       state,
       login,
       logout,
+      changePassword,
       retryRestore,
       selectOutlet,
       dismissNotice,
+      lockForInactivity,
+      unlockWithLogin,
       apiRequest,
     ],
   );

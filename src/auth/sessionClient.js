@@ -264,13 +264,20 @@ export function createAuthClient({
       typeof data.user.id !== "string" ||
       typeof data.user.name !== "string" ||
       typeof data.user.email !== "string" ||
+      typeof data.user.mustChangePassword !== "boolean" ||
       !Array.isArray(data.user.memberships) ||
       data.user.memberships.some(
         (membership) =>
           typeof membership?.outletId !== "string" ||
           typeof membership?.outletCode !== "string" ||
           typeof membership?.outletName !== "string" ||
-          !["CREW", "MANAGER", "OWNER"].includes(membership?.role),
+          ![
+            "ADMIN_PUSAT",
+            "OWNER_MITRA",
+            "OWNER",
+            "MANAGER",
+            "CREW",
+          ].includes(membership?.role),
       ) ||
       !data.session ||
       typeof data.session.id !== "string"
@@ -279,6 +286,21 @@ export function createAuthClient({
         "INVALID_RESPONSE",
         502,
         "Profil pengguna dari server tidak sesuai kontrak.",
+      );
+    }
+    return data;
+  }
+
+  async function changePassword({ currentPassword, newPassword }) {
+    const data = await request("/api/v1/auth/change-password", {
+      method: "POST",
+      body: { currentPassword, newPassword },
+    });
+    if (data?.passwordChanged !== true) {
+      throw new AuthApiError(
+        "INVALID_RESPONSE",
+        502,
+        "Respons perubahan password dari server tidak sesuai kontrak.",
       );
     }
     return data;
@@ -381,6 +403,7 @@ export function createAuthClient({
     login,
     logout,
     logoutAll,
+    changePassword,
     profile,
     request,
     restoreSession,
