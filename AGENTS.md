@@ -1,4 +1,4 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility. The current Expo Router routes live in `app/`; keep non-route code in `src/`.
 
 ## Expo has changed — do not trust your training data
 
@@ -25,7 +25,7 @@ Run lint and typecheck before declaring any task done.
 
 ## Navigation & Routing
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
+- Use **Expo Router** for all navigation. Routes live in `app/` — every route file there is a screen, `_layout.js` files define navigators. Keep non-route code (components, hooks, utils) in `src/`.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
@@ -33,6 +33,15 @@ Run lint and typecheck before declaring any task done.
 
 Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
+
+## Seroo product/security rules
+
+- Read `docs/mobile/PRD.md`, `docs/mobile/API-CONTRACT.md`, and `docs/mobile/OPEN-DECISIONS.md` before implementing product behavior.
+- Seroo uses individual Crew/Manager/Owner accounts. MVP account creation is Administrator-only. Manager account management of Crew is a future outlet-scoped permission, not an MVP screen/API unless explicitly authorized.
+- Online-first limited offline support applies only to POS and waste using Expo SQLite. Do not store credentials/tokens in the local queue. Every operation must retain the same `clientTransactionId` and payload for retries; local queued status is not server success.
+- QRIS recorded offline is `PENDING_RECONCILIATION`, never verified/settled. Transfer and stock adjustment require online connectivity on MVP.
+- Follow the latest role session policy in `docs/mobile/OPEN-DECISIONS.md`; client timers are UX controls and do not replace backend enforcement.
+- Product prices being global across outlets is an unconfirmed temporary assumption. Do not hardcode it as a final business rule.
 
 ## Rules
 
