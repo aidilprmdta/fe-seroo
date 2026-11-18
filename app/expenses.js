@@ -1,696 +1,423 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Crypto from "expo-crypto";
-import * as Network from "expo-network";
-import { router } from "expo-router";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
-import { useAuth } from "../src/auth/AuthContext";
-import { ROUTES } from "../src/auth/routePolicy";
-import Notice from "../src/components/Notice";
-import PrimaryButton from "../src/components/PrimaryButton";
-import ScreenFrame from "../src/components/ScreenFrame";
-import { createExpenseApi } from "../src/expenses/api";
-import { canReachInternet } from "../src/pos/cart";
-import { colors, spacing } from "../src/theme/tokens";
+// ExpensesScreen — pengeluaran: list, create, koreksi, batalkan, audit
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import { useAuth } from '../src/auth/AuthContext';
+import { createExpensesApi } from '../src/api/expenses';
+import { createApiClient } from '../src/api/api';
+import { colors, spacing, typography, radii } from '../src/theme/tokens';
+import Card from '../src/components/Card';
+import ListItem from '../src/components/ListItem';
+import Input from '../src/components/Input';
+import BaseButton from '../src/components/BaseButton';
+import Badge from '../src/components/Badge';
+import EmptyState from '../src/components/EmptyState';
+import ScreenFrame from '../src/components/ScreenFrame';
+import AppShell from '../src/components/AppShell';
+import Notice from '../src/components/Notice';
+import Modal from '../src/components/Modal';
 
-const AMOUNT_PATTERN = /^(0|[1-9]\d{0,9})(\.\d{1,2})?$/;
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-function todayLocal() {
-  const date = new Date();
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
+function uuidv4() {
+  const bytes = Crypto.getRandomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function snapshotSummary(snapshot) {
-  if (!snapshot) return "Data tidak tersedia";
-  return [
-    snapshot.categoryName ?? "Kategori tidak tersedia",
-    `Rp ${snapshot.amount ?? "-"}`,
-    snapshot.status === "CANCELLED" ? "Dibatalkan" : "Aktif",
-    new Date(snapshot.expenseDate).toLocaleDateString("id-ID"),
-  ].join(" · ");
+function formatRupiah(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toLocaleString('id-ID') : '0';
 }
 
-function ExpenseField({
-  label,
-  value,
-  onChangeText,
-  disabled,
-  numeric = false,
-  multiline = false,
-}) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        editable={!disabled}
-        keyboardType={numeric ? "decimal-pad" : "default"}
-        maxLength={500}
-        multiline={multiline}
-        onChangeText={onChangeText}
-        style={[styles.input, multiline && styles.multiline]}
-        value={value}
-      />
-    </View>
-  );
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function toIsoDate(dateKey) {
+  return new Date(`${dateKey}T00:00:00+07:00`).toISOString();
 }
 
 export default function ExpensesScreen() {
-  const { user, selection, apiRequest } = useAuth();
-  const { width } = useWindowDimensions();
+  const { selection } = useAuth();
   const outletId = selection.activeOutletId;
-  const role = selection.activeRole;
-  const canManage = role === "MANAGER";
-  const api = useMemo(
-    () => createExpenseApi({ request: apiRequest }),
-    [apiRequest],
-  );
-  const [categories, setCategories] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [fullAudits, setFullAudits] = useState({});
-  const [categoryId, setCategoryId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [expenseDate, setExpenseDate] = useState(todayLocal);
-  const [description, setDescription] = useState("");
-  const [reason, setReason] = useState("");
-  const [editingExpenseId, setEditingExpenseId] = useState(null);
-  const [pendingOperation, setPendingOperation] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const pendingRef = useRef(null);
-  const savingRef = useRef(false);
-  const wideLayout = width >= 900;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const [expenses, setExpenses] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [categoryId, setCategoryId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(todayKey());
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [target, setTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ amount: '', date: '', description: '', reason: '' });
+  const [cancelReason, setCancelReason] = useState('');
+  const [auditRows, setAuditRows] = useState([]);
+
+  const getApi = useCallback(() => {
+    const client = createApiClient();
+    return createExpensesApi({ request: client });
+  }, []);
+
+  const loadExpenses = useCallback(async () => {
     try {
-      const [categoryResult, expenseResult] = await Promise.all([
-        api.getCategories(),
-        api.getExpenses(outletId),
-      ]);
-      setCategories(categoryResult.categories);
-      setExpenses(expenseResult.expenses);
-    } catch (loadError) {
-      setError(loadError.message);
+      const data = await getApi().getExpenses(outletId, { pageSize: 100 });
+      setExpenses(data?.data?.expenses || []);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Riwayat pengeluaran gagal dimuat.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [api, outletId]);
+  }, [outletId, getApi]);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const data = await getApi().getExpenseCategories();
+      const list = data?.data || [];
+      setCategories(list);
+      setCategoryId((current) => current || list[0]?.id || '');
+    } catch (err) {
+      setError(err?.message || 'Kategori gagal dimuat.');
+    }
+  }, [getApi]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadExpenses();
+    loadCategories();
+  }, [loadExpenses, loadCategories]);
 
-  const resetForm = () => {
-    setEditingExpenseId(null);
-    setCategoryId("");
-    setAmount("");
-    setExpenseDate(todayLocal());
-    setDescription("");
-    setReason("");
-  };
-
-  const executeOperation = async (operation) => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
+  const handleCreate = useCallback(async () => {
     setError(null);
-    setNotice(null);
-    try {
-      const networkState = await Network.getNetworkStateAsync();
-      if (!canReachInternet(networkState)) {
-        setError("Pengeluaran hanya dapat dikirim saat online.");
-        return;
-      }
-
-      let result;
-      if (operation.type === "CREATE") {
-        result = await api.createExpense(outletId, operation.payload);
-      } else if (operation.type === "CORRECT") {
-        result = await api.correctExpense(
-          outletId,
-          operation.expenseId,
-          operation.payload,
-        );
-      } else {
-        result = await api.cancelExpense(
-          outletId,
-          operation.expenseId,
-          operation.payload,
-        );
-      }
-      pendingRef.current = null;
-      setPendingOperation(null);
-      setNotice(
-        result.replayed
-          ? "Perubahan ini sudah tersimpan sebelumnya."
-          : operation.type === "CANCEL"
-            ? "Pengeluaran dibatalkan dan jejak audit tersimpan."
-            : operation.type === "CORRECT"
-              ? "Koreksi tersimpan dan jejak audit dibuat."
-              : "Pengeluaran tersimpan di server.",
-      );
-      resetForm();
-      await loadData();
-    } catch (operationError) {
-      if (operationError.status && operationError.status < 500) {
-        pendingRef.current = null;
-        setPendingOperation(null);
-      }
-      setError(operationError.message);
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  const saveExpense = () => {
-    if (!canManage || savingRef.current || pendingRef.current) return;
-    const date = new Date(`${expenseDate}T00:00:00.000Z`);
-    if (
-      !categoryId ||
-      !AMOUNT_PATTERN.test(amount) ||
-      Number(amount) <= 0 ||
-      !DATE_PATTERN.test(expenseDate) ||
-      Number.isNaN(date.getTime()) ||
-      date.toISOString().slice(0, 10) !== expenseDate
-    ) {
-      setError("Pilih kategori, nominal positif, dan tanggal yang valid.");
+    if (!categoryId || !(Number(amount) > 0) || !date) {
+      setError('Kategori, nominal, dan tanggal wajib diisi.');
       return;
     }
-
-    const payload = {
-      clientTransactionId: Crypto.randomUUID(),
-      ...(editingExpenseId ? {} : { categoryId }),
-      ...(editingExpenseId
-        ? {
-            categoryId,
-            reason: reason.trim() || undefined,
-          }
-        : {}),
-      amount,
-      expenseDate: date.toISOString(),
-      description: description.trim() || null,
-    };
-    const operation = {
-      type: editingExpenseId ? "CORRECT" : "CREATE",
-      ...(editingExpenseId ? { expenseId: editingExpenseId } : {}),
-      payload,
-    };
-    pendingRef.current = operation;
-    setPendingOperation(operation);
-    executeOperation(operation);
-  };
-
-  const beginEdit = (expense) => {
-    if (!canManage || pendingOperation || expense.status !== "ACTIVE") return;
-    setEditingExpenseId(expense.id);
-    setCategoryId(expense.category.id);
-    setAmount(expense.amount);
-    setExpenseDate(expense.expenseDate.slice(0, 10));
-    setDescription(expense.description ?? "");
-    setReason("");
-    setError(null);
-    setNotice(null);
-  };
-
-  const confirmCancellation = (expense) => {
-    if (!canManage || pendingRef.current || expense.status !== "ACTIVE") return;
-    Alert.alert(
-      "Batalkan pengeluaran?",
-      "Data tidak dihapus. Status dan snapshot sebelum/sesudah akan disimpan di audit.",
-      [
-        { text: "Kembali", style: "cancel" },
-        {
-          text: "Batalkan",
-          style: "destructive",
-          onPress: () => {
-            const operation = {
-              type: "CANCEL",
-              expenseId: expense.id,
-              payload: { clientTransactionId: Crypto.randomUUID() },
-            };
-            pendingRef.current = operation;
-            setPendingOperation(operation);
-            executeOperation(operation);
-          },
-        },
-      ],
-    );
-  };
-
-  const loadFullAudit = async (expenseId) => {
-    setError(null);
+    setSubmitting(true);
     try {
-      const result = await api.getAudit(outletId, expenseId);
-      setFullAudits((current) => ({ ...current, [expenseId]: result.audits }));
-    } catch (auditError) {
-      setError(auditError.message);
+      await getApi().createExpense(outletId, {
+        clientTransactionId: uuidv4(),
+        categoryId,
+        amount: String(Number(amount)),
+        expenseDate: toIsoDate(date),
+        description: description.trim() || undefined,
+      });
+      setAmount('');
+      setDescription('');
+      setDate(todayKey());
+      await loadExpenses();
+      Alert.alert('Berhasil', 'Pengeluaran berhasil dicatat.');
+    } catch (err) {
+      setError(err?.message || 'Pengeluaran gagal disimpan.');
+    } finally {
+      setSubmitting(false);
     }
-  };
+  }, [categoryId, amount, date, description, outletId, getApi, loadExpenses]);
 
-  const outlet = user.memberships.find(
-    (membership) => membership.outletId === outletId,
-  );
-  const formDisabled = saving || pendingOperation !== null;
+  const openEdit = useCallback((expense) => {
+    setTarget(expense);
+    setEditForm({
+      amount: String(expense.amount),
+      date: (expense.expenseDate || '').slice(0, 10),
+      description: expense.description || '',
+      reason: '',
+    });
+    setError(null);
+    setModal('edit');
+  }, []);
+
+  const handleEdit = useCallback(async () => {
+    setError(null);
+    if (!(Number(editForm.amount) > 0) || !editForm.date) {
+      setError('Nominal dan tanggal wajib diisi.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await getApi().editExpense(outletId, target.id, {
+        clientTransactionId: uuidv4(),
+        amount: String(Number(editForm.amount)),
+        expenseDate: toIsoDate(editForm.date),
+        description: editForm.description.trim(),
+        reason: editForm.reason.trim() || 'Koreksi dari aplikasi mobile',
+      });
+      setModal(null);
+      await loadExpenses();
+      Alert.alert('Berhasil', 'Pengeluaran berhasil dikoreksi.');
+    } catch (err) {
+      setError(err?.message || 'Koreksi gagal.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [editForm, target, outletId, getApi, loadExpenses]);
+
+  const openCancel = useCallback((expense) => {
+    setTarget(expense);
+    setCancelReason('');
+    setError(null);
+    setModal('cancel');
+  }, []);
+
+  const handleCancel = useCallback(async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await getApi().cancelExpense(outletId, target.id, {
+        clientTransactionId: uuidv4(),
+        reason: cancelReason.trim() || 'Dibatalkan dari aplikasi mobile',
+      });
+      setModal(null);
+      await loadExpenses();
+      Alert.alert('Berhasil', 'Pengeluaran dibatalkan.');
+    } catch (err) {
+      setError(err?.message || 'Pembatalan gagal.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [target, cancelReason, outletId, getApi, loadExpenses]);
+
+  const openAudit = useCallback(async (expense) => {
+    setTarget(expense);
+    setAuditRows([]);
+    setError(null);
+    setModal('audit');
+    try {
+      const data = await getApi().getExpenseAudit(outletId, expense.id);
+      setAuditRows(data?.data?.audits || []);
+    } catch (err) {
+      setError(err?.message || 'Audit gagal dimuat.');
+    }
+  }, [outletId, getApi]);
 
   return (
-    <ScreenFrame>
+    <AppShell
+      navRole="manager"
+      active="biaya"
+      title="Pengeluaran outlet"
+      subtitle="Catat tanggal kejadian, kategori, dan nominal. Pengeluaran masuk ke rekap."
+      roleLabel="MANAGER"
+      outletLabel={outletId || 'Outlet'}
+      scopeLabel={outletId || 'Outlet'}
+      contentStyle={styles.container}
+    >
       <ScrollView
-        contentContainerStyle={styles.page}
-        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadExpenses} />}
       >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>Keuangan · {role}</Text>
-            <Text style={styles.title}>Pengeluaran</Text>
-            <Text style={styles.subtitle}>{outlet?.outletName}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            <PrimaryButton label="Muat ulang" secondary onPress={loadData} />
-            <PrimaryButton
-              label="Kembali"
-              secondary
-              onPress={() =>
-                router.replace(
-                  role === "MANAGER" ? ROUTES.manager : ROUTES.owner,
-                )
-              }
-            />
-          </View>
-        </View>
+        {error && !modal && <Notice message={error} type="error" />}
 
-        <Notice message={error} type="error" />
-        <Notice message={notice} type="success" />
-        {pendingOperation ? (
-          <View style={styles.pendingBox}>
-            <Text style={styles.helper}>
-              Hasil perubahan belum diketahui. Retry memakai ID dan payload
-              transaksi yang sama; jangan buat ulang operasi ini.
-            </Text>
-            <PrimaryButton
-              label="Coba kirim lagi"
-              loading={saving}
-              onPress={() => executeOperation(pendingOperation)}
-            />
+        <Card style={styles.formCard}>
+          <Text style={styles.sectionTitle}>Catat Pengeluaran</Text>
+          <Text style={styles.label}>Kategori</Text>
+          <View style={styles.chipRow}>
+            {categories.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.chip, categoryId === item.id && styles.chipActive]}
+                onPress={() => setCategoryId(item.id)}
+              >
+                <Text style={[styles.chipText, categoryId === item.id && styles.chipTextActive]}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        ) : null}
+          <Input label="Jumlah (Rp)" value={amount} onChangeText={setAmount} placeholder="0" keyboardType="numeric" />
+          <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
+          <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Keterangan pengeluaran" />
+          <BaseButton label="Simpan Pengeluaran" onPress={handleCreate} loading={submitting} fullWidth size="lg" />
+        </Card>
 
-        <View style={[styles.content, wideLayout && styles.wideContent]}>
-          {canManage ? (
-            <View style={[styles.panel, wideLayout && styles.formPanel]}>
-              <Text style={styles.sectionTitle}>
-                {editingExpenseId ? "Koreksi pengeluaran" : "Catat pengeluaran"}
-              </Text>
-              <Text style={styles.helper}>
-                Kategori saat ini bersifat sementara dan dapat berubah setelah
-                konfirmasi Seroo.
-              </Text>
-              <View style={styles.field}>
-                <Text style={styles.label}>Kategori</Text>
-                <View style={styles.categoryList}>
-                  {categories.map((category) => (
-                    <Pressable
-                      key={category.id}
-                      accessibilityRole="radio"
-                      accessibilityState={{
-                        checked: category.id === categoryId,
-                      }}
-                      disabled={formDisabled}
-                      onPress={() => setCategoryId(category.id)}
-                      style={[
-                        styles.categoryOption,
-                        category.id === categoryId && styles.categorySelected,
-                        formDisabled && styles.disabled,
-                      ]}
-                    >
-                      <Text style={styles.categoryName}>{category.name}</Text>
-                      {category.status === "PROVISIONAL" ? (
-                        <Text style={styles.provisional}>Sementara</Text>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                </View>
-                {categories.length === 0 && !loading ? (
-                  <Text style={styles.helper}>
-                    Belum ada kategori pengeluaran dari server.
-                  </Text>
-                ) : null}
-              </View>
-              <ExpenseField
-                label="Nominal (Rp)"
-                value={amount}
-                onChangeText={setAmount}
-                disabled={formDisabled}
-                numeric
-              />
-              <ExpenseField
-                label="Tanggal (YYYY-MM-DD)"
-                value={expenseDate}
-                onChangeText={setExpenseDate}
-                disabled={formDisabled}
-              />
-              <ExpenseField
-                label="Keterangan (opsional)"
-                value={description}
-                onChangeText={setDescription}
-                disabled={formDisabled}
-                multiline
-              />
-              {editingExpenseId ? (
-                <ExpenseField
-                  label="Alasan koreksi (opsional)"
-                  value={reason}
-                  onChangeText={setReason}
-                  disabled={formDisabled}
-                  multiline
+        <Text style={styles.sectionTitle}>Riwayat Pengeluaran</Text>
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={colors.light.primary} />
+          </View>
+        ) : expenses.length === 0 ? (
+          <EmptyState icon={<Text style={styles.icon}>💰</Text>} title="Belum ada data" subtitle="Pengeluaran akan muncul di sini." />
+        ) : (
+          expenses.map((expense) => (
+            <Card key={expense.id} style={styles.expenseCard}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.expenseTitle}>{expense.description || 'Tanpa keterangan'}</Text>
+                <Badge
+                  label={expense.status === 'ACTIVE' ? '✓ Aktif' : '✗ Batal'}
+                  variant={expense.status === 'ACTIVE' ? 'success' : 'danger'}
                 />
-              ) : null}
-              <View style={styles.formActions}>
-                <PrimaryButton
-                  label={editingExpenseId ? "Simpan koreksi" : "Simpan"}
-                  disabled={formDisabled || categories.length === 0}
-                  loading={saving}
-                  onPress={saveExpense}
-                />
-                {editingExpenseId && !pendingOperation ? (
-                  <PrimaryButton
-                    label="Batal koreksi"
-                    secondary
-                    onPress={resetForm}
-                  />
-                ) : null}
               </View>
-            </View>
-          ) : null}
-
-          <View style={[styles.panel, wideLayout && styles.listPanel]}>
-            <Text style={styles.sectionTitle}>Daftar pengeluaran</Text>
-            {loading ? (
-              <Text style={styles.helper}>Memuat data pengeluaran…</Text>
-            ) : expenses.length === 0 ? (
-              <Text style={styles.helper}>
-                Belum ada pengeluaran yang tercatat untuk outlet ini.
+              <Text style={styles.expenseMeta}>
+                Rp {formatRupiah(expense.amount)} · {expense.category?.name || '-'} · {(expense.expenseDate || '').slice(0, 10)}
               </Text>
-            ) : (
-              expenses.map((expense) => {
-                const audits = fullAudits[expense.id] ?? expense.audits;
-                return (
-                  <View key={expense.id} style={styles.expenseCard}>
-                    <View style={styles.expenseHeading}>
-                      <Text style={styles.expenseCategory}>
-                        {expense.category.name}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.status,
-                          expense.status === "CANCELLED" && styles.cancelled,
-                        ]}
-                      >
-                        {expense.status === "ACTIVE" ? "Aktif" : "Dibatalkan"}
-                      </Text>
-                    </View>
-                    <Text style={styles.amount}>Rp {expense.amount}</Text>
-                    <Text style={styles.expenseMeta}>
-                      {new Date(expense.expenseDate).toLocaleDateString("id-ID")}
-                      {" · "}Dibuat oleh {expense.createdBy?.name ?? "Manager"}
-                    </Text>
-                    {expense.description ? (
-                      <Text style={styles.description}>{expense.description}</Text>
-                    ) : null}
-                    {canManage && expense.status === "ACTIVE" ? (
-                      <View style={styles.formActions}>
-                        <PrimaryButton
-                          label="Koreksi"
-                          secondary
-                          disabled={formDisabled || editingExpenseId !== null}
-                          onPress={() => beginEdit(expense)}
-                        />
-                        <PrimaryButton
-                          label="Batalkan"
-                          secondary
-                          disabled={formDisabled || editingExpenseId !== null}
-                          onPress={() => confirmCancellation(expense)}
-                        />
-                      </View>
-                    ) : null}
-                    {audits.length > 0 ? (
-                      <View style={styles.auditList}>
-                        <Text style={styles.auditHeading}>Riwayat audit</Text>
-                        {audits.map((audit) => (
-                          <View key={audit.id} style={styles.auditEntry}>
-                            <Text style={styles.auditAction}>
-                              {audit.action === "CORRECTED"
-                                ? "Dikoreksi"
-                                : "Dibatalkan"}
-                              {" · "}
-                              {new Date(audit.createdAt).toLocaleString("id-ID")}
-                            </Text>
-                            <Text style={styles.helper}>
-                              Sebelum: {snapshotSummary(audit.before)}
-                            </Text>
-                            <Text style={styles.helper}>
-                              Sesudah: {snapshotSummary(audit.after)}
-                            </Text>
-                            {audit.reason ? (
-                              <Text style={styles.helper}>
-                                Alasan: {audit.reason}
-                              </Text>
-                            ) : null}
-                          </View>
-                        ))}
-                      </View>
-                    ) : null}
-                    {audits.length === 10 ? (
-                      <PrimaryButton
-                        label="Muat seluruh riwayat audit"
-                        secondary
-                        onPress={() => loadFullAudit(expense.id)}
-                      />
-                    ) : null}
-                  </View>
-                );
-              })
-            )}
-          </View>
-        </View>
+              <View style={styles.rowActions}>
+                <TouchableOpacity style={styles.action} onPress={() => openEdit(expense)}>
+                  <Text style={styles.actionText}>Koreksi</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.action} onPress={() => openAudit(expense)}>
+                  <Text style={styles.actionText}>Audit</Text>
+                </TouchableOpacity>
+                {expense.status === 'ACTIVE' && (
+                  <TouchableOpacity style={[styles.action, styles.actionDanger]} onPress={() => openCancel(expense)}>
+                    <Text style={[styles.actionText, styles.actionDangerText]}>Batal</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </Card>
+          ))
+        )}
       </ScrollView>
-    </ScreenFrame>
+
+      <Modal
+        visible={modal === 'edit'}
+        onClose={() => setModal(null)}
+        title="Koreksi Pengeluaran"
+        subtitle="Perubahan akan tercatat di audit log."
+        footer={<BaseButton label="Simpan Koreksi" onPress={handleEdit} loading={submitting} fullWidth size="lg" />}
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+          <Input label="Nominal" value={editForm.amount} onChangeText={(v) => setEditForm({ ...editForm, amount: v })} keyboardType="numeric" />
+          <Input label="Tanggal" value={editForm.date} onChangeText={(v) => setEditForm({ ...editForm, date: v })} keyboardType="numeric" />
+          <Input label="Deskripsi" value={editForm.description} onChangeText={(v) => setEditForm({ ...editForm, description: v })} />
+          <Input label="Alasan koreksi" value={editForm.reason} onChangeText={(v) => setEditForm({ ...editForm, reason: v })} />
+        </View>
+      </Modal>
+
+      <Modal
+        visible={modal === 'cancel'}
+        onClose={() => setModal(null)}
+        title="Batalkan Pengeluaran"
+        subtitle="Pengeluaran akan berstatus CANCELLED."
+        footer={<BaseButton label="Batalkan Pengeluaran" onPress={handleCancel} loading={submitting} fullWidth size="lg" variant="danger" />}
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+          <Input label="Alasan" value={cancelReason} onChangeText={setCancelReason} placeholder="Contoh: input ganda" />
+        </View>
+      </Modal>
+
+      <Modal
+        visible={modal === 'audit'}
+        onClose={() => setModal(null)}
+        title="Audit Pengeluaran"
+        subtitle="Riwayat perubahan pengeluaran."
+        footer={<BaseButton label="Tutup" onPress={() => setModal(null)} fullWidth size="lg" variant="secondary" />}
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+          {auditRows.length === 0 ? (
+            <Text style={styles.modalText}>Belum ada riwayat audit.</Text>
+          ) : (
+            auditRows.map((row) => (
+              <View key={row.id} style={styles.auditRow}>
+                <Text style={styles.auditAction}>{row.action || row.activity || '-'}</Text>
+                <Text style={styles.modalText}>{row.createdAt || ''}</Text>
+              </View>
+            ))
+          )}
+        </View>
+      </Modal>
+    </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flexGrow: 1,
-    width: "100%",
-    maxWidth: 1280,
-    alignSelf: "center",
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: spacing.md,
-  },
-  headerActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  eyebrow: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
+  container: { padding: spacing.lg, gap: spacing.md },
+  header: { gap: spacing.sm },
   title: {
-    color: colors.textPrimary,
-    fontSize: 28,
-    fontWeight: "800",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
   },
   subtitle: {
-    color: colors.textSecondary,
-    fontSize: 16,
-    marginTop: spacing.xs,
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
   },
-  content: {
-    gap: spacing.md,
-  },
-  wideContent: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  panel: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  formPanel: {
-    flex: 0.9,
-    minWidth: 340,
-  },
-  listPanel: {
-    flex: 1.1,
-    minWidth: 380,
-  },
+  formCard: { gap: spacing.md },
   sectionTitle: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  helper: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  pendingBox: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.infoSurface,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  field: {
-    gap: spacing.xs,
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    marginTop: spacing.lg,
   },
   label: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "700",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  input: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    color: colors.textPrimary,
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
     paddingHorizontal: spacing.md,
-    fontSize: 16,
-  },
-  multiline: {
-    minHeight: 76,
-    paddingTop: spacing.sm,
-    textAlignVertical: "top",
-  },
-  categoryList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  categoryOption: {
-    minHeight: 48,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    justifyContent: "center",
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surface,
   },
-  categorySelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceMuted,
+  chipActive: { backgroundColor: colors.light.primary, borderColor: colors.light.primary },
+  chipText: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  categoryName: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  provisional: {
-    color: colors.textSecondary,
-    fontSize: 11,
-  },
-  disabled: {
-    opacity: 0.55,
-  },
-  formActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  expenseCard: {
-    borderTopWidth: 1,
-    borderColor: colors.border,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
-  },
-  expenseHeading: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  expenseCategory: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: "800",
-    flexShrink: 1,
-  },
-  status: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  cancelled: {
-    color: colors.danger,
-  },
-  amount: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "800",
+  chipTextActive: { color: colors.light.onPrimary },
+  loading: { padding: spacing.xl, alignItems: 'center' },
+  icon: { fontSize: 40 },
+  expenseCard: { gap: spacing.sm },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  expenseTitle: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.light.textPrimary,
+    flex: 1,
   },
   expenseMeta: {
-    color: colors.textSecondary,
-    fontSize: 13,
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  description: {
-    color: colors.textPrimary,
-    fontSize: 14,
+  rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  action: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.light.surfaceSecondary,
+    alignItems: 'center',
   },
-  auditList: {
-    borderTopWidth: 1,
-    borderColor: colors.border,
-    paddingTop: spacing.sm,
-    gap: spacing.sm,
+  actionDanger: { backgroundColor: colors.light.dangerSurface },
+  actionText: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.primary,
   },
-  auditHeading: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "800",
+  actionDangerText: { color: colors.light.danger },
+  modalContent: { padding: spacing.md, gap: spacing.md },
+  modalText: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  auditEntry: {
-    borderLeftWidth: 2,
-    borderColor: colors.primary,
-    paddingLeft: spacing.sm,
-    gap: 4,
+  auditRow: {
+    padding: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.light.surfaceSecondary,
+    gap: spacing.xs,
   },
   auditAction: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: "700",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
   },
 });

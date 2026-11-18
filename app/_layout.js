@@ -1,4 +1,7 @@
 import { Stack } from "expo-router";
+import { View, ActivityIndicator } from "react-native";
+import { useSerooFonts } from "../src/theme/fonts";
+import { colors } from "../src/theme/tokens";
 import { AuthProvider, useAuth } from "../src/auth/AuthContext";
 import AutoLockGate from "../src/auth/AutoLockGate";
 import {
@@ -18,12 +21,15 @@ function GuardedStack() {
     <AutoLockGate>
       <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="auth/ganti-password" />
 
       <Stack.Protected
         guard={status === "anonymous" || status === "error"}
         redirectTo="/"
       >
         <Stack.Screen name="auth/login" />
+        <Stack.Screen name="auth/bantuan-reset-password" />
+        <Stack.Screen name="auth/cooldown" />
       </Stack.Protected>
 
       <Stack.Protected
@@ -31,6 +37,8 @@ function GuardedStack() {
         redirectTo="/"
       >
         <Stack.Screen name="profile" />
+        <Stack.Screen name="help-faq" />
+        <Stack.Screen name="notifications" />
 
         <Stack.Protected
           guard={!passwordChangeRequired}
@@ -84,14 +92,17 @@ function GuardedStack() {
 
           <Stack.Protected
             guard={isAllowedRoute(
-              ROUTES.adminCatalog,
+              ROUTES.adminDashboard,
               memberships,
               selection,
             )}
             redirectTo={landingRoute}
           >
+            <Stack.Screen name="admin/dashboard" />
             <Stack.Screen name="admin/catalog" />
             <Stack.Screen name="admin/accounts" />
+            <Stack.Screen name="admin/audit" />
+            <Stack.Screen name="admin/outlets" />
           </Stack.Protected>
 
           <Stack.Protected
@@ -120,6 +131,7 @@ function GuardedStack() {
             redirectTo={landingRoute}
           >
             <Stack.Screen name="reports" />
+            <Stack.Screen name="owner/outlet-members" />
           </Stack.Protected>
 
           <Stack.Protected
@@ -136,6 +148,16 @@ function GuardedStack() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useSerooFonts();
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.light.background }}>
+        <ActivityIndicator size="large" color={colors.light.primary} />
+      </View>
+    );
+  }
+
   return (
     <AuthProvider>
       <GuardedStack />

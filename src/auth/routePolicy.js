@@ -10,12 +10,21 @@ export const ROUTES = {
   owner: "/owner/dashboard",
   adminCatalog: "/admin/catalog",
   adminAccounts: "/admin/accounts",
+  adminAudit: "/admin/audit",
+  adminDashboard: "/admin/dashboard",
+  adminOutlets: "/admin/outlets",
+  notifications: "/notifications",
   inventory: "/inventory",
   waste: "/waste",
   stockRequests: "/stock-requests",
   expenses: "/expenses",
   reports: "/reports",
   closings: "/closings",
+  forgotPassword: "/auth/bantuan-reset-password",
+  changePassword: "/auth/ganti-password",
+  cooldown: "/auth/cooldown",
+  helpFaq: "/help-faq",
+  outletMembers: "/owner/outlet-members",
 };
 
 const ROLE_ROUTES = {
@@ -84,7 +93,15 @@ export function isAllowedRoute(pathname, memberships, context) {
   if (pathname === ROUTES.login) {
     return false;
   }
-  if (pathname === ROUTES.profile) {
+  if (
+    pathname === ROUTES.profile ||
+    pathname === ROUTES.changePassword ||
+    pathname === ROUTES.helpFaq ||
+    pathname === ROUTES.notifications
+  ) {
+    return true;
+  }
+  if (pathname === ROUTES.forgotPassword || pathname === ROUTES.cooldown) {
     return true;
   }
 
@@ -130,7 +147,10 @@ export function isAllowedRoute(pathname, memberships, context) {
   }
   if (
     pathname === ROUTES.adminCatalog ||
-    pathname === ROUTES.adminAccounts
+    pathname === ROUTES.adminAccounts ||
+    pathname === ROUTES.adminAudit ||
+    pathname === ROUTES.adminDashboard ||
+    pathname === ROUTES.adminOutlets
   ) {
     const membership =
       getSelectedMembership(memberships, context?.activeOutletId) ||
@@ -140,7 +160,8 @@ export function isAllowedRoute(pathname, memberships, context) {
   if (
     pathname === ROUTES.expenses ||
     pathname === ROUTES.reports ||
-    pathname === ROUTES.closings
+    pathname === ROUTES.closings ||
+    pathname === ROUTES.outletMembers
   ) {
     const membership = getSelectedMembership(
       memberships,

@@ -1,112 +1,162 @@
-import { useEffect, useState } from "react";
-import { router } from "expo-router";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { useAuth } from "../src/auth/AuthContext";
-import { resolveLandingRoute } from "../src/auth/routePolicy";
-import LogoutButton from "../src/components/LogoutButton";
-import PrimaryButton from "../src/components/PrimaryButton";
-import ScreenFrame from "../src/components/ScreenFrame";
-import { colors, spacing } from "../src/theme/tokens";
-
-const ROLE_LABELS = {
-  CREW: "Crew",
-  MANAGER: "Manager",
-  OWNER: "Owner",
-};
+// SelectOutletScreen — choose outlet from list
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../src/auth/AuthContext';
+import { resolveLandingRoute } from '../src/auth/routePolicy';
+import { OutletsApi } from '../src/api/api';
+import { createApiClient } from '../src/api/api';
+import ListItem from '../src/components/ListItem';
+import EmptyState from '../src/components/EmptyState';
+import ScreenFrame from '../src/components/ScreenFrame';
+import { colors, spacing, typography, radii } from '../src/theme/tokens';
 
 export default function SelectOutletScreen() {
-  const { user, selection, selectOutlet } = useAuth();
-  const [pendingRoute, setPendingRoute] = useState(null);
-  const memberships = user.memberships;
+  const router = useRouter();
+  const { user, selection, selectOutlet, status } = useAuth();
+  const [outlets, setOutlets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const loadOutlets = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const client = createApiClient();
+      const api = new OutletsApi(client);
+      const data = await api.listOutlets();
+      setOutlets(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err?.message || 'Gagal memuat outlet');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (
-      pendingRoute &&
-      selection?.activeOutletId === pendingRoute.activeOutletId &&
-      selection?.activeRole === pendingRoute.activeRole
-    ) {
-      router.replace(pendingRoute.route);
-      setPendingRoute(null);
-    }
-  }, [pendingRoute, selection]);
+    loadOutlets();
+  }, [loadOutlets]);
 
-  function handleSelectOutlet(membership) {
-    const selection = {
-      activeOutletId: membership.outletId,
-      activeRole: membership.role,
-    };
-    selectOutlet(membership.outletId);
-    setPendingRoute({
-      ...selection,
-      route: resolveLandingRoute(memberships, selection),
-    });
+  const handleSelect = useCallback((outlet) => {
+    selectOutlet(outlet.id);
+    router.replace(
+      resolveLandingRoute(user?.memberships, { activeOutletId: outlet.id }),
+    );
+  }, [selectOutlet, router, user?.memberships]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadOutlets();
+  }, [loadOutlets]);
+
+  if (status === 'loading') {
+    return (
+      <ScreenFrame>
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color={colors.light.primary} />
+          <Text style={styles.text}>Memuat outlet…</Text>
+        </View>
+      </ScreenFrame>
+    );
   }
 
   return (
     <ScreenFrame>
       <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={styles.header}>
-          <Text style={styles.eyebrow}>Seroo · Konteks akses</Text>
-          <Text style={styles.title}>Pilih outlet</Text>
-          <Text style={styles.subtitle}>
-            Pilih outlet sesuai membership dan role yang diberikan.
-          </Text>
-        </View>
-
-        <View style={styles.list}>
-          {memberships.map((membership) => (
-            <PrimaryButton
-              key={membership.outletId}
-              label={`${membership.outletName} · ${membership.outletCode} · ${ROLE_LABELS[membership.role]}`}
-              secondary
-              disabled={Boolean(pendingRoute)}
-              loading={Boolean(pendingRoute)}
-              onPress={() => handleSelectOutlet(membership)}
-              accessibilityLabel={`Pilih ${membership.outletName}, ${ROLE_LABELS[membership.role]}`}
-            />
-          ))}
-        </View>
-
-        <LogoutButton />
+        {error ? (
+          <EmptyState
+            title="Tidak dapat memuat outlet"
+            subtitle={error}
+            action={
+              <View style={styles.action}>
+                <Text style={styles.retry} onPress={loadOutlets}>Coba lagi</Text>
+              </View>
+            }
+          />
+        ) : outlets.length === 0 ? (
+          <EmptyState
+            icon={<Text style={styles.icon}>🏢</Text>}
+            title="Tidak ada outlet"
+            subtitle="Belum ada outlet yang terdaftar untuk akun ini."
+            action={
+              <View style={styles.action}>
+                <Text style={styles.retry} onPress={loadOutlets}>Coba lagi</Text>
+              </View>
+            }
+          />
+        ) : (
+          <>
+            <Text style={styles.header}>Outlet</Text>
+            {outlets.map(outlet => (
+              <ListItem
+                key={outlet.id}
+                title={outlet.name}
+                subtitle={`Kode: ${outlet.code}`}
+                leading={
+                  <View style={styles.radio}>
+                    {selection.activeOutletId === outlet.id ? (
+                      <Text style={styles.radioChecked}>●</Text>
+                    ) : (
+                      <Text style={styles.radioUnchecked}>○</Text>
+                    )}
+                  </View>
+                }
+                onPress={() => handleSelect(outlet)}
+              />
+            ))}
+          </>
+        )}
       </ScrollView>
     </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    flexGrow: 1,
-    width: "100%",
-    maxWidth: 760,
-    alignSelf: "center",
-    justifyContent: "center",
+  container: {
     padding: spacing.lg,
-    gap: spacing.lg,
+    gap: spacing.md,
+  },
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
-    gap: spacing.xs,
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xl,
+    color: colors.light.textPrimary,
+    marginBottom: spacing.md,
   },
-  eyebrow: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
+  radio: {
+    width: 24,
+    height: 24,
+    borderRadius: radii.full,
+    borderWidth: 2,
+    borderColor: colors.light.border,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  title: {
-    color: colors.textPrimary,
-    fontSize: 28,
-    fontWeight: "800",
+  radioChecked: {
+    color: colors.light.primary,
+    fontSize: 14,
   },
-  subtitle: {
-    color: colors.textSecondary,
-    fontSize: 16,
-    lineHeight: 23,
+  radioUnchecked: {
+    color: colors.light.textSecondary,
+    fontSize: 12,
   },
-  list: {
-    gap: spacing.sm,
+  action: {
+    marginTop: spacing.md,
+  },
+  retry: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.light.primary,
   },
 });

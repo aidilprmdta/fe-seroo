@@ -56,12 +56,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   primary: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: colors.light.primary,
+    borderColor: colors.light.primary,
   },
   secondary: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    backgroundColor: colors.light.surface,
+    borderColor: colors.light.border,
   },
   content: {
     alignItems: "center",
@@ -73,10 +73,10 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   primaryLabel: {
-    color: colors.onPrimary,
+    color: colors.light.onPrimary,
   },
   secondaryLabel: {
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   disabled: {
     opacity: 0.55,

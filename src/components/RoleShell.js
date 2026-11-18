@@ -1,32 +1,19 @@
-import { router } from "expo-router";
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { ROUTES } from "../auth/routePolicy";
-import { useAuth } from "../auth/AuthContext";
-import { colors, spacing } from "../theme/tokens";
-import LogoutButton from "./LogoutButton";
-import Notice from "./Notice";
-import PrimaryButton from "./PrimaryButton";
-import ProfileButton from "./ProfileButton";
-import ScreenFrame from "./ScreenFrame";
+// RoleShell — shell for role-based screens (manager, owner, crew, admin)
+import React from 'react';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { useAuth } from '../auth/AuthContext';
+import { colors, spacing, typography, radii } from '../theme/tokens';
+import LogoutButton from './LogoutButton';
+import Notice from './Notice';
+import PrimaryButton from './PrimaryButton';
+import ProfileButton from './ProfileButton';
+import ScreenFrame from './ScreenFrame';
 
-export default function RoleShell({
-  title,
-  role,
-  emptyState,
-  readOnly = false,
-  actions = [],
-}) {
-  const { user, selection, notice } = useAuth();
-  const memberships = user.memberships;
-  const selectedOutlet = memberships.find(
-    (membership) => membership.outletId === selection.activeOutletId,
-  );
-  const outletLabel = selectedOutlet?.outletName ?? "Outlet belum dipilih";
+export default function RoleShell({ title, subtitle, emptyState, readOnly = false, actions = [] }) {
+  const { user, session, selection } = useAuth();
+  const memberships = user?.memberships ?? [];
+  const outlet = memberships.find(m => m.outletId === selection.activeOutletId);
+  const outletLabel = outlet?.outletName ?? 'Outlet belum dipilih';
 
   return (
     <ScreenFrame>
@@ -34,42 +21,48 @@ export default function RoleShell({
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>Seroo · {role}</Text>
+            <Text style={styles.eyebrow}>Seroo · {user?.role ?? ''}</Text>
             <Text style={styles.title}>{title}</Text>
             <Text style={styles.subtitle}>
-              {user.name} · {readOnly ? "Akses baca saja" : role}
+              {user?.name} · {readOnly ? 'Akses baca saja' : user?.role}
             </Text>
           </View>
-          {memberships.length > 1 ? (
+          {memberhips?.length > 1 && (
             <PrimaryButton
               label="Pilih outlet"
               secondary
               onPress={() => router.push(ROUTES.selectOutlet)}
             />
-          ) : null}
+          )}
         </View>
 
+        {/* Outlet context */}
         <View style={styles.context}>
           <Text style={styles.contextLabel}>Outlet aktif</Text>
           <Text style={styles.contextTitle}>{outletLabel}</Text>
-          {selectedOutlet ? (
+          {outlet ? (
             <Text style={styles.contextDetail}>
-              {selectedOutlet.outletCode} · {selectedOutlet.role}
+              {outlet.outletCode} · {outlet.role}
             </Text>
           ) : null}
         </View>
 
-        <View style={styles.emptyState}>
-          <Text style={styles.status}>Dalam Pengembangan</Text>
-          <Text style={styles.emptyTitle}>{title}</Text>
-          <Text style={styles.emptyText}>{emptyState}</Text>
-        </View>
+        {/* Main content */}
+        {emptyState ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.status}>Dalam Pengembangan</Text>
+            <Text style={styles.emptyTitle}>{title}</Text>
+            <Text style={styles.emptyText}>{emptyState}</Text>
+          </View>
+        ) : null}
 
-        {actions.length ? (
+        {/* Actions */}
+        {actions.length > 0 ? (
           <View style={styles.actions}>
-            {actions.map((action) => (
+            {actions.map(action => (
               <PrimaryButton
                 key={action.label}
                 label={action.label}
@@ -80,7 +73,10 @@ export default function RoleShell({
           </View>
         ) : null}
 
-        <Notice message={notice} type="info" />
+        {/* Notice */}
+        <Notice message={session?.notice} type="info" />
+
+        {/* Footer */}
         <View style={styles.footer}>
           <ProfileButton />
           <LogoutButton />
@@ -93,17 +89,17 @@ export default function RoleShell({
 const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
-    width: "100%",
+    width: '100%',
     maxWidth: 960,
-    alignSelf: "center",
+    alignSelf: 'center',
     padding: spacing.lg,
     gap: spacing.lg,
   },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: spacing.md,
   },
   headerCopy: {
@@ -112,79 +108,90 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   eyebrow: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    textTransform: 'uppercase',
   },
   title: {
-    color: colors.textPrimary,
-    fontSize: 28,
-    fontWeight: "800",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
   },
   subtitle: {
-    color: colors.textSecondary,
-    fontSize: 15,
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
   },
   context: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
+    borderColor: colors.light.border,
+    borderRadius: radii.lg,
+    backgroundColor: colors.light.surface,
     padding: spacing.md,
     gap: spacing.xs,
   },
   contextLabel: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "600",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
   contextTitle: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "700",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.lg,
+    color: colors.light.textPrimary,
   },
   contextDetail: {
-    color: colors.textSecondary,
-    fontSize: 14,
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
   },
   emptyState: {
     flex: 1,
     minHeight: 220,
-    justifyContent: "center",
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
+    borderColor: colors.light.border,
+    borderRadius: radii.lg,
+    backgroundColor: colors.light.surface,
     padding: spacing.lg,
     gap: spacing.sm,
   },
   status: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    textTransform: 'uppercase',
   },
   emptyTitle: {
-    color: colors.textPrimary,
-    fontSize: 22,
-    fontWeight: "700",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xl,
+    color: colors.light.textPrimary,
   },
   emptyText: {
-    color: colors.textSecondary,
-    fontSize: 16,
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
     lineHeight: 23,
   },
   footer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
     gap: spacing.sm,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.light.border,
   },
   actions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
 });

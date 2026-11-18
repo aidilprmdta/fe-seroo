@@ -1,363 +1,371 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Crypto from "expo-crypto";
-import * as Network from "expo-network";
-import { router } from "expo-router";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
-import { useAuth } from "../src/auth/AuthContext";
-import { ROUTES } from "../src/auth/routePolicy";
-import Notice from "../src/components/Notice";
-import PrimaryButton from "../src/components/PrimaryButton";
-import ScreenFrame from "../src/components/ScreenFrame";
-import { createInventoryApi } from "../src/inventory/api";
-import { canReachInternet } from "../src/pos/cart";
-import { colors, spacing } from "../src/theme/tokens";
+// InventoryScreen — stok aktif + form Stok Masuk / Stok Sesuai
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import { useAuth } from '../src/auth/AuthContext';
+import { createInventoryApi } from '../src/api/inventory';
+import { createApiClient } from '../src/api/api';
+import { colors, spacing, typography, radii } from '../src/theme/tokens';
+import Card from '../src/components/Card';
+import ListItem from '../src/components/ListItem';
+import BaseButton from '../src/components/BaseButton';
+import Input from '../src/components/Input';
+import Notice from '../src/components/Notice';
+import Modal from '../src/components/Modal';
+import Badge from '../src/components/Badge';
+import EmptyState from '../src/components/EmptyState';
+import ScreenFrame from '../src/components/ScreenFrame';
+import AppShell from '../src/components/AppShell';
 
-const QUANTITY_PATTERN = /^(0|[1-9]\d{0,8})(\.\d{1,3})?$/;
-const MOVEMENT_LABELS = {
-  IN: "Stok masuk",
-  OUT: "Stok keluar",
-  WASTE: "Waste",
-  ADJUSTMENT: "Penyesuaian",
-  TRANSFER_IN: "Transfer masuk",
-  TRANSFER_OUT: "Transfer keluar",
-};
-
-function StockInput({ label, value, onChangeText, disabled, numeric = false }) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        editable={!disabled}
-        keyboardType={numeric ? "decimal-pad" : "default"}
-        onChangeText={onChangeText}
-        style={[styles.input, disabled && styles.inputDisabled]}
-        value={value}
-      />
-    </View>
-  );
+function uuidv4() {
+  const bytes = Crypto.getRandomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export default function InventoryScreen() {
-  const { user, selection, apiRequest } = useAuth();
-  const { width } = useWindowDimensions();
+  const { selection } = useAuth();
   const outletId = selection.activeOutletId;
-  const role = selection.activeRole;
-  const canManage = role === "MANAGER";
-  const api = useMemo(() => createInventoryApi({ request: apiRequest }), [apiRequest]);
   const [stocks, setStocks] = useState([]);
   const [movements, setMovements] = useState([]);
-  const [selectedItemId, setSelectedItemId] = useState("");
-  const [movementType, setMovementType] = useState("IN");
-  const [direction, setDirection] = useState("INCREASE");
-  const [quantity, setQuantity] = useState("");
-  const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [mode, setMode] = useState('IN');
+  const [inventoryItemId, setInventoryItemId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [direction, setDirection] = useState('INCREASE');
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const [pendingPayload, setPendingPayload] = useState(null);
-  const savingRef = useRef(false);
-  const wideLayout = width >= 900;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadStock = useCallback(async () => {
     try {
-      const [stockResult, movementResult] = await Promise.all([
-        api.getStocks(outletId),
-        api.getMovements(outletId),
-      ]);
-      setStocks(stockResult.stocks);
-      setMovements(movementResult.movements);
-      setSelectedItemId((current) =>
-        stockResult.stocks.some((item) => item.inventoryItemId === current)
-          ? current
-          : stockResult.stocks[0]?.inventoryItemId ?? "",
-      );
-    } catch (loadError) {
-      setError(loadError.message);
+      const client = createApiClient();
+      const inventoryApi = createInventoryApi({ request: client });
+      const data = await inventoryApi.getStock(outletId, { page: 1, pageSize: 50 });
+      setStocks(data?.data?.stocks || []);
+    } catch (err) {
+      setError(err?.message || 'Stok gagal dimuat.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [api, outletId]);
+  }, [outletId]);
+
+  const loadMovements = useCallback(async () => {
+    try {
+      const client = createApiClient();
+      const api = createInventoryApi({ request: client });
+      const data = await api.getStockMovements(outletId, { pageSize: 50 });
+      setMovements(data?.data?.movements || []);
+    } catch {
+      // riwayat bersifat opsional
+    }
+  }, [outletId]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadStock();
+    loadMovements();
+  }, [loadStock, loadMovements]);
 
-  const submitMovement = async () => {
-    if (savingRef.current || !canManage) return;
-    if (!selectedItemId || !QUANTITY_PATTERN.test(quantity) || Number(quantity) <= 0) {
-      setError("Pilih item dan masukkan jumlah stok yang valid.");
-      return;
-    }
-    if (movementType === "ADJUSTMENT" && !reason.trim()) {
-      setError("Alasan penyesuaian wajib diisi.");
-      return;
-    }
-
-    savingRef.current = true;
-    setSaving(true);
+  const openModal = useCallback((nextMode) => {
+    setMode(nextMode);
+    setInventoryItemId('');
+    setQuantity('');
+    setDirection('INCREASE');
+    setNote('');
     setError(null);
-    setNotice(null);
-    try {
-      const networkState = await Network.getNetworkStateAsync();
-      if (!canReachInternet(networkState)) {
-        setError("Penerimaan dan penyesuaian stok hanya dapat dikirim saat online.");
-        return;
-      }
+    setModalVisible(true);
+  }, []);
 
-      const payload =
-        pendingPayload ??
-        {
-          clientTransactionId: Crypto.randomUUID(),
-          inventoryItemId: selectedItemId,
-          type: movementType,
-          ...(movementType === "ADJUSTMENT" ? { direction } : {}),
-          quantity,
-          ...(reason.trim() ? { note: reason.trim() } : {}),
-        };
-      setPendingPayload(payload);
-      const result = await api.createMovement(outletId, payload);
-      setPendingPayload(null);
-      setQuantity("");
-      setReason("");
-      setNotice(
-        result.replayed
-          ? "Perubahan stok sudah tercatat sebelumnya."
-          : "Perubahan stok dan ledger berhasil disimpan.",
-      );
-      await loadData();
-    } catch (submitError) {
-      if (submitError.status && submitError.status < 500) {
-        setPendingPayload(null);
-      }
-      setError(submitError.message);
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+    if (!inventoryItemId.trim()) {
+      setError('Pilih item stok terlebih dahulu.');
+      return;
     }
-  };
+    if (!(Number(quantity) > 0)) {
+      setError('Jumlah harus lebih dari nol.');
+      return;
+    }
+    if (mode === 'ADJUSTMENT' && !note.trim()) {
+      setError('Alasan penyesuaian wajib diisi.');
+      return;
+    }
 
-  const selectedOutlet = user.memberships.find(
-    (membership) => membership.outletId === outletId,
-  );
+    const payload = {
+      clientTransactionId: uuidv4(),
+      inventoryItemId: inventoryItemId.trim(),
+      type: mode,
+      quantity: String(Number(quantity)),
+      ...(mode === 'ADJUSTMENT' ? { direction, note: note.trim() } : {}),
+    };
+
+    setSubmitting(true);
+    try {
+      const client = createApiClient();
+      const api = createInventoryApi({ request: client });
+      if (mode === 'ADJUSTMENT') {
+        await api.createStockAdjustment(outletId, payload);
+      } else {
+        await api.createStockReceipt(outletId, payload);
+      }
+      Alert.alert('Berhasil', 'Pergerakan stok berhasil dicatat.');
+      setModalVisible(false);
+      loadStock();
+      loadMovements();
+    } catch (err) {
+      setError(err?.message || 'Pergerakan stok gagal disimpan.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [inventoryItemId, quantity, mode, direction, note, outletId, loadStock, loadMovements]);
 
   return (
-    <ScreenFrame>
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>Persediaan · {role}</Text>
-            <Text style={styles.title}>Stok outlet</Text>
-            <Text style={styles.subtitle}>{selectedOutlet?.outletName}</Text>
+    <AppShell
+      navRole="manager"
+      active="stok"
+      title="Inventaris outlet"
+      subtitle="Manager melihat jumlah, satuan, batas minimum, dan pergerakan stok."
+      roleLabel="MANAGER"
+      outletLabel={outletId || 'Outlet'}
+      scopeLabel={outletId || 'Outlet'}
+      contentStyle={styles.container}
+    >
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              loadStock();
+              loadMovements();
+            }}
+          />
+        }
+      >
+        {error && !modalVisible && <Notice message={error} type="error" />}
+
+        <View style={styles.actionsCard}>
+          <View style={styles.scopeBadge}>
+            <Text style={styles.scopeBadgeText}>OUTLET INI</Text>
           </View>
-          <View style={styles.headerActions}>
-            <PrimaryButton
-              label="Muat ulang"
-              secondary
-              onPress={loadData}
+          <View style={styles.actions}>
+            <BaseButton
+              label="Stok masuk"
+              onPress={() => openModal('IN')}
+              fullWidth
+              size="lg"
+              variant="primary"
             />
-            <PrimaryButton
-              label="Waste"
-              secondary
-              onPress={() => router.push(ROUTES.waste)}
+            <BaseButton
+              label="Penyesuaian"
+              onPress={() => openModal('ADJUSTMENT')}
+              fullWidth
+              size="lg"
+              variant="secondary"
             />
-            <PrimaryButton
-              label="Kembali"
-              secondary
-              onPress={() =>
-                router.replace(role === "MANAGER" ? ROUTES.manager : ROUTES.crew)
+          </View>
+        </View>
+
+        <Text style={styles.sectionTitle}>Daftar barang</Text>
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={colors.light.primary} />
+            <Text style={styles.text}>Memuat stok…</Text>
+          </View>
+        ) : stocks.length === 0 ? (
+          <EmptyState
+            icon={<Text style={styles.icon}>📦</Text>}
+            title="Tidak ada stok"
+            subtitle="Stok akan muncul setelah ada data."
+          />
+        ) : (
+          stocks.map((item) => (
+            <ListItem
+              key={item.id}
+              title={item.name}
+              subtitle={`Unit: ${item.unit} · Sisa: ${item.quantity || 0}`}
+              right={
+                <Badge
+                  label={item.minimumQuantity > 0 && item.quantity < item.minimumQuantity
+                    ? '⚠️ Rendah'
+                    : '✓ OK'}
+                />
               }
             />
-          </View>
-        </View>
-
-        <Notice message={error} />
-        <Notice message={notice} type="info" />
-
-        {loading ? <Text style={styles.helper}>Memuat data stok...</Text> : null}
-        <View style={[styles.columns, wideLayout && styles.wideColumns]}>
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Saldo saat ini</Text>
-            {!loading && stocks.length === 0 ? (
-              <Text style={styles.empty}>
-                Belum ada item inventaris aktif. Hubungi pengelola untuk menyiapkan master data.
-              </Text>
-            ) : null}
-            {stocks.map((item) => (
-              <View key={item.inventoryItemId} style={styles.stockRow}>
-                <View style={styles.rowCopy}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.helper}>{item.updatedAt ? "Saldo diperbarui" : "Belum ada pergerakan"}</Text>
-                </View>
-                <Text style={styles.quantity}>{item.quantity} {item.unit}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Riwayat pergerakan</Text>
-            {movements.length === 0 && !loading ? (
-              <Text style={styles.empty}>Belum ada pergerakan stok untuk outlet ini.</Text>
-            ) : null}
-            {movements.map((movement) => (
-              <View key={movement.id} style={styles.historyRow}>
-                <View style={styles.rowCopy}>
-                  <Text style={styles.itemName}>{movement.inventoryItem.name}</Text>
-                  <Text style={styles.helper}>
-                    {MOVEMENT_LABELS[movement.type] ?? movement.type}
-                    {movement.note ? ` · ${movement.note}` : ""}
-                  </Text>
-                  <Text style={styles.helper}>
-                    {movement.createdBy?.name ?? "Pengguna"} ·{" "}
-                    {new Date(movement.createdAt).toLocaleString("id-ID")}
-                  </Text>
-                </View>
-                <Text style={styles.quantity}>
-                  {movement.quantity} {movement.inventoryItem.unit}
-                </Text>
-              </View>
-            ))}
-          </View>
-
-          {canManage ? (
-            <View style={styles.panel}>
-              <Text style={styles.sectionTitle}>Catat perubahan stok</Text>
-              {pendingPayload ? (
-                <Text style={styles.helper}>
-                  Hasil permintaan belum diketahui. Kirim ulang data yang sama untuk memastikan tidak terjadi pencatatan ganda.
-                </Text>
-              ) : null}
-              <Text style={styles.label}>Jenis perubahan</Text>
-              <View style={styles.choiceRow}>
-                {[
-                  ["IN", "Stok masuk"],
-                  ["ADJUSTMENT", "Penyesuaian"],
-                ].map(([value, label]) => (
-                  <Pressable
-                    key={value}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: movementType === value }}
-                    disabled={Boolean(pendingPayload)}
-                    onPress={() => setMovementType(value)}
-                    style={[styles.choice, movementType === value && styles.choiceSelected]}
-                  >
-                    <Text style={styles.choiceText}>{label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              {movementType === "ADJUSTMENT" ? (
-                <>
-                  <Text style={styles.label}>Arah penyesuaian</Text>
-                  <View style={styles.choiceRow}>
-                    {[
-                      ["INCREASE", "Tambah"],
-                      ["DECREASE", "Kurangi"],
-                    ].map(([value, label]) => (
-                      <Pressable
-                        key={value}
-                        accessibilityRole="radio"
-                        accessibilityState={{ checked: direction === value }}
-                        disabled={Boolean(pendingPayload)}
-                        onPress={() => setDirection(value)}
-                        style={[styles.choice, direction === value && styles.choiceSelected]}
-                      >
-                        <Text style={styles.choiceText}>{label}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-
-              <Text style={styles.label}>Item inventaris</Text>
-              <View style={styles.itemChoices}>
-                {stocks.map((item) => (
-                  <Pressable
-                    key={item.inventoryItemId}
-                    accessibilityRole="radio"
-                    accessibilityState={{
-                      checked: selectedItemId === item.inventoryItemId,
-                    }}
-                    disabled={Boolean(pendingPayload)}
-                    onPress={() => setSelectedItemId(item.inventoryItemId)}
-                    style={[
-                      styles.choice,
-                      selectedItemId === item.inventoryItemId && styles.choiceSelected,
-                    ]}
-                  >
-                    <Text style={styles.choiceText}>{item.name} · {item.unit}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <StockInput
-                label="Jumlah"
-                value={quantity}
-                onChangeText={setQuantity}
-                disabled={Boolean(pendingPayload)}
-                numeric
-              />
-              {movementType === "ADJUSTMENT" ? (
-                <StockInput
-                  label="Alasan penyesuaian"
-                  value={reason}
-                  onChangeText={setReason}
-                  disabled={Boolean(pendingPayload)}
-                />
-              ) : null}
-              <PrimaryButton
-                label={pendingPayload ? "Kirim ulang perubahan yang sama" : "Simpan perubahan stok"}
-                loading={saving}
-                disabled={stocks.length === 0}
-                onPress={submitMovement}
-              />
-              <Text style={styles.helper}>
-                Perubahan hanya dikirim saat online. Penyesuaian keluar tidak dapat membuat saldo negatif.
-              </Text>
-            </View>
-          ) : null}
-        </View>
+          ))
+        )}
+        <Text style={styles.sectionTitle}>Mutasi Stok</Text>
+        {movements.length === 0 ? (
+          <EmptyState
+            icon={<Text style={styles.icon}>📦</Text>}
+            title="Belum ada mutasi"
+            subtitle="Mutasi stok akan muncul setelah dicatat."
+          />
+        ) : (
+          movements.map((item) => (
+            <ListItem
+              key={item.id}
+              title={`${item.inventoryItem?.name || item.inventoryItemId || 'Item'} · ${item.type}`}
+              subtitle={`${item.quantity} · ${item.note || 'Tanpa catatan'}`}
+              right={<Badge label={(item.createdAt || '').slice(0, 10)} />}
+            />
+          ))
+        )}
       </ScrollView>
-    </ScreenFrame>
+
+      <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title={mode === 'IN' ? 'Stok Masuk' : 'Stok Sesuai'}
+        subtitle="Pilih item dan masukkan jumlah pergerakan stok."
+        footer={
+          <BaseButton
+            label="Simpan Pergerakan"
+            onPress={handleSubmit}
+            loading={submitting}
+            fullWidth
+            size="lg"
+          />
+        }
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+
+          <Text style={styles.modalLabel}>Item Stok</Text>
+          <View style={styles.itemChips}>
+            {stocks.slice(0, 12).map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.chip, inventoryItemId === item.id && styles.chipActive]}
+                onPress={() => setInventoryItemId(item.id)}
+              >
+                <Text style={[styles.chipText, inventoryItemId === item.id && styles.chipTextActive]}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Input
+            label="Atau masukkan ID item"
+            value={inventoryItemId}
+            onChangeText={setInventoryItemId}
+            placeholder="ID item stok"
+          />
+          <Input
+            label="Jumlah"
+            value={quantity}
+            onChangeText={setQuantity}
+            placeholder="0"
+            keyboardType="numeric"
+          />
+
+          {mode === 'ADJUSTMENT' && (
+            <>
+              <Text style={styles.modalLabel}>Arah Penyesuaian</Text>
+              <View style={styles.roleRow}>
+                {['INCREASE', 'DECREASE'].map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[styles.chip, direction === option && styles.chipActive]}
+                    onPress={() => setDirection(option)}
+                  >
+                    <Text style={[styles.chipText, direction === option && styles.chipTextActive]}>
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Input
+                label="Alasan penyesuaian"
+                value={note}
+                onChangeText={setNote}
+                placeholder="Contoh: stok rusak saat penerimaan"
+              />
+            </>
+          )}
+        </View>
+      </Modal>
+    </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, width: "100%", maxWidth: 1280, alignSelf: "center", padding: spacing.lg, gap: spacing.lg },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.md },
-  headerCopy: { flex: 1, minWidth: 220, gap: spacing.xs },
-  headerActions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  eyebrow: { color: colors.textSecondary, fontSize: 13, fontWeight: "700", textTransform: "uppercase" },
-  title: { color: colors.textPrimary, fontSize: 28, fontWeight: "800" },
-  subtitle: { color: colors.textSecondary, fontSize: 15 },
-  columns: { gap: spacing.md },
-  wideColumns: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start" },
-  panel: { flex: 1, minWidth: 300, gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface, padding: spacing.lg },
-  sectionTitle: { color: colors.textPrimary, fontSize: 19, fontWeight: "700" },
-  stockRow: { minHeight: 64, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: spacing.sm },
-  historyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: spacing.md },
-  rowCopy: { flex: 1, gap: 4 },
-  itemName: { color: colors.textPrimary, fontSize: 16, fontWeight: "700" },
-  quantity: { color: colors.textPrimary, fontSize: 18, fontWeight: "700", textAlign: "right" },
-  helper: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
-  empty: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
-  label: { color: colors.textPrimary, fontSize: 14, fontWeight: "700" },
-  field: { gap: spacing.xs },
-  input: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: spacing.md, color: colors.textPrimary, backgroundColor: colors.surface },
-  inputDisabled: { backgroundColor: colors.surfaceMuted, color: colors.textSecondary },
-  choiceRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  itemChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  choice: { minHeight: 48, justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: spacing.md, backgroundColor: colors.surface },
-  choiceSelected: { borderColor: colors.primary, backgroundColor: colors.surfaceMuted },
-  choiceText: { color: colors.textPrimary, fontSize: 14, fontWeight: "600" },
+  container: { padding: spacing.lg, gap: spacing.md },
+  header: { gap: spacing.sm, justifyContent: 'center' },
+  title: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
+  },
+  subtitle: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
+  },
+  actionsCard: {
+    backgroundColor: colors.light.surface,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  scopeBadge: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.light.surfaceMuted,
+    borderRadius: 999,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  scopeBadgeText: {
+    ...typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
+    fontSize: 10,
+    color: colors.light.maroon,
+  },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  sectionTitle: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    marginTop: spacing.lg,
+  },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  text: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
+  },
+  icon: { fontSize: 40 },
+  modalContent: { padding: spacing.md, gap: spacing.md },
+  modalLabel: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+  },
+  itemChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  roleRow: { flexDirection: 'row', gap: spacing.sm },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surface,
+  },
+  chipActive: { backgroundColor: colors.light.primary, borderColor: colors.light.primary },
+  chipText: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+  },
+  chipTextActive: { color: colors.light.onPrimary },
 });

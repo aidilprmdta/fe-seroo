@@ -1,39 +1,61 @@
-import { StyleSheet, Text, View } from "react-native";
-import { colors, spacing } from "../theme/tokens";
+// Notice — info/danger/success banner
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { colors, spacing, typography, radii } from '../theme/tokens';
 
-export default function Notice({ message, type = "error" }) {
-  if (!message) {
-    return null;
-  }
+export default function Notice({ message, type = 'info', style }) {
+  if (!message) return null;
 
-  const isError = type === "error";
+  const getStyle = () => {
+    switch (type) {
+      case 'error':
+        return styles.error;
+      case 'warning':
+        return styles.warning;
+      case 'success':
+        return styles.success;
+      default:
+        return styles.info;
+    }
+  };
+
   return (
-    <View
-      accessibilityLiveRegion="polite"
-      style={[styles.container, isError ? styles.error : styles.info]}
-    >
-      <Text style={[styles.text, isError && styles.errorText]}>{message}</Text>
+    <View style={[styles.container, getStyle(), style]}>
+      <Text style={styles.message}>{message}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 8,
+    margin: spacing.md,
     padding: spacing.md,
-  },
-  error: {
-    backgroundColor: colors.dangerSurface,
+    borderRadius: radii.md,
+    gap: spacing.xs,
   },
   info: {
-    backgroundColor: colors.infoSurface,
+    backgroundColor: colors.light.infoSurface,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.light.info,
   },
-  text: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    lineHeight: 20,
+  success: {
+    backgroundColor: colors.light.successSurface,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.light.success,
   },
-  errorText: {
-    color: colors.danger,
+  warning: {
+    backgroundColor: colors.light.warningSurface,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.light.warning,
+  },
+  error: {
+    backgroundColor: colors.light.dangerSurface,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.light.danger,
+  },
+  message: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textPrimary,
   },
 });

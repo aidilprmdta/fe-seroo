@@ -1,550 +1,357 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Crypto from "expo-crypto";
-import * as Network from "expo-network";
-import { router } from "expo-router";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
-import { useAuth } from "../src/auth/AuthContext";
-import { ROUTES } from "../src/auth/routePolicy";
-import Notice from "../src/components/Notice";
-import PrimaryButton from "../src/components/PrimaryButton";
-import ScreenFrame from "../src/components/ScreenFrame";
-import { createInventoryApi } from "../src/inventory/api";
-import { canReachInternet } from "../src/pos/cart";
-import { colors, spacing } from "../src/theme/tokens";
+// StockRequestsScreen — permintaan stok crew + persetujuan manager
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import { useAuth } from '../src/auth/AuthContext';
+import { createStockRequestsApi } from '../src/api/stock-requests';
+import { createInventoryApi } from '../src/api/inventory';
+import { createApiClient } from '../src/api/api';
+import { colors, spacing, typography, radii } from '../src/theme/tokens';
+import Card from '../src/components/Card';
+import Input from '../src/components/Input';
+import BaseButton from '../src/components/BaseButton';
+import Badge from '../src/components/Badge';
+import EmptyState from '../src/components/EmptyState';
+import ScreenFrame from '../src/components/ScreenFrame';
+import Notice from '../src/components/Notice';
+import Modal from '../src/components/Modal';
 
-const QUANTITY_PATTERN = /^(0|[1-9]\d{0,8})(\.\d{1,3})?$/;
-const STATUS_LABELS = {
-  PENDING: "Menunggu keputusan Manager",
-  APPROVED: "Disetujui · belum berarti stok diterima",
-  REJECTED: "Ditolak",
-};
+function uuidv4() {
+  const bytes = Crypto.getRandomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
-function StockRequestScreen() {
-  const { user, selection, apiRequest } = useAuth();
-  const { width } = useWindowDimensions();
+function statusLabel(status) {
+  if (status === 'PENDING') return '⏳ Menunggu';
+  if (status === 'APPROVED') return '✓ Disetujui';
+  if (status === 'REJECTED') return '✗ Ditolak';
+  return '✓ Selesai';
+}
+
+export default function StockRequestsScreen() {
+  const { user, selection } = useAuth();
   const outletId = selection.activeOutletId;
-  const role = selection.activeRole;
-  const canDecide = role === "MANAGER";
-  const api = useMemo(
-    () => createInventoryApi({ request: apiRequest }),
-    [apiRequest],
-  );
-  const [stocks, setStocks] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [selectedItems, setSelectedItems] = useState({});
-  const [note, setNote] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const [pendingPayload, setPendingPayload] = useState(null);
-  const savingRef = useRef(false);
-  const wideLayout = width >= 900;
+  const role = user?.memberships?.find((m) => m.outletId === outletId)?.role;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const [requests, setRequests] = useState([]);
+  const [stocks, setStocks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ inventoryItemId: '', quantity: '', note: '' });
+  const [decision, setDecision] = useState(null);
+
+  const getApi = useCallback(() => {
+    const client = createApiClient();
+    return {
+      stockApi: createStockRequestsApi({ request: client }),
+      inventoryApi: createInventoryApi({ request: client }),
+    };
+  }, []);
+
+  const loadRequests = useCallback(async () => {
     try {
-      const [stockResult, requestResult] = await Promise.all([
-        api.getStocks(outletId),
-        api.getStockRequests(outletId),
-      ]);
-      setStocks(stockResult.stocks);
-      setRequests(requestResult.requests);
-    } catch (loadError) {
-      setError(loadError.message);
+      const data = await getApi().stockApi.listRequests(outletId);
+      setRequests(data?.data?.requests || []);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Permintaan stok gagal dimuat.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [api, outletId]);
+  }, [outletId, getApi]);
+
+  const loadStocks = useCallback(async () => {
+    try {
+      const data = await getApi().inventoryApi.getStock(outletId);
+      setStocks(data?.data?.stocks || []);
+    } catch {
+      // item bisa diisi manual
+    }
+  }, [outletId, getApi]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadRequests();
+    if (role === 'CREW') loadStocks();
+  }, [loadRequests, loadStocks, role]);
 
-  const toggleItem = (inventoryItemId) => {
-    setSelectedItems((current) => {
-      const next = { ...current };
-      if (next[inventoryItemId] !== undefined) {
-        delete next[inventoryItemId];
-      } else {
-        next[inventoryItemId] = "";
-      }
-      return next;
-    });
-  };
+  const openCreate = useCallback(() => {
+    setForm({ inventoryItemId: stocks[0]?.id || '', quantity: '', note: '' });
+    setError(null);
+    setModal('create');
+  }, [stocks]);
 
-  const submitRequest = async () => {
-    if (savingRef.current) return;
-    const items = Object.entries(selectedItems).map(
-      ([inventoryItemId, quantity]) => ({ inventoryItemId, quantity }),
-    );
-    if (
-      items.length === 0 ||
-      items.some(
-        (item) =>
-          !QUANTITY_PATTERN.test(item.quantity) || Number(item.quantity) <= 0,
-      )
-    ) {
-      setError("Pilih sedikitnya satu item dan masukkan jumlah yang valid.");
+  const handleCreate = useCallback(async () => {
+    setError(null);
+    if (!form.inventoryItemId || !(Number(form.quantity) > 0)) {
+      setError('Pilih item dan isi jumlah lebih dari nol.');
       return;
     }
-
-    savingRef.current = true;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
+    setSubmitting(true);
     try {
-      const networkState = await Network.getNetworkStateAsync();
-      if (!canReachInternet(networkState)) {
-        setError("Permintaan stok memerlukan koneksi internet.");
-        return;
-      }
-      const payload =
-        pendingPayload ??
-        {
-          clientTransactionId: Crypto.randomUUID(),
-          items,
-          ...(note.trim() ? { note: note.trim() } : {}),
-        };
-      setPendingPayload(payload);
-      const result = await api.createStockRequest(outletId, payload);
-      setPendingPayload(null);
-      setSelectedItems({});
-      setNote("");
-      setNotice(
-        result.replayed
-          ? "Permintaan ini sudah tersimpan sebelumnya."
-          : "Permintaan stok berhasil dikirim ke server.",
-      );
-      await loadData();
-    } catch (submitError) {
-      if (submitError.status && submitError.status < 500) {
-        setPendingPayload(null);
-      }
-      setError(submitError.message);
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  const decideRequest = (request, status) => {
-    const isApproval = status === "APPROVED";
-    Alert.alert(
-      isApproval ? "Setujui permintaan?" : "Tolak permintaan?",
-      isApproval
-        ? "Persetujuan tidak mengubah saldo stok dan bukan konfirmasi penerimaan."
-        : "Permintaan akan ditandai sebagai ditolak.",
-      [
-        { text: "Kembali", style: "cancel" },
-        {
-          text: isApproval ? "Setujui" : "Tolak",
-          style: isApproval ? "default" : "destructive",
-          onPress: async () => {
-            if (savingRef.current) return;
-            savingRef.current = true;
-            setSaving(true);
-            setError(null);
-            setNotice(null);
-            try {
-              const networkState = await Network.getNetworkStateAsync();
-              if (!canReachInternet(networkState)) {
-                setError("Keputusan permintaan hanya dapat dikirim saat online.");
-                return;
-              }
-              const result = await api.decideStockRequest(
-                outletId,
-                request.id,
-                { status },
-              );
-              setNotice(
-                result.replayed
-                  ? "Keputusan ini sudah tersimpan."
-                  : status === "APPROVED"
-                    ? "Permintaan disetujui. Stok belum berubah."
-                    : "Permintaan ditolak.",
-              );
-              await loadData();
-            } catch (decisionError) {
-              setError(decisionError.message);
-              await loadData();
-            } finally {
-              savingRef.current = false;
-              setSaving(false);
-            }
+      await getApi().stockApi.createRequest(outletId, {
+        clientTransactionId: uuidv4(),
+        items: [
+          {
+            inventoryItemId: form.inventoryItemId,
+            quantity: String(Number(form.quantity)),
           },
-        },
-      ],
-    );
-  };
+        ],
+        note: form.note.trim() || undefined,
+      });
+      Alert.alert('Berhasil', 'Permintaan stok berhasil dibuat.');
+      setModal(null);
+      loadRequests();
+    } catch (err) {
+      setError(err?.message || 'Permintaan stok gagal dibuat.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [form, getApi, outletId, loadRequests]);
 
-  const outlet = user.memberships.find(
-    (membership) => membership.outletId === outletId,
-  );
-  const formDisabled = saving || pendingPayload !== null;
+  const openDecision = useCallback((request, status) => {
+    setDecision({ requestId: request.id, status });
+    setError(null);
+    setModal('decision');
+  }, []);
+
+  const handleDecision = useCallback(async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await getApi().stockApi.processRequest(outletId, decision.requestId, {
+        status: decision.status,
+      });
+      Alert.alert(
+        'Berhasil',
+        decision.status === 'APPROVED'
+          ? 'Permintaan disetujui.'
+          : 'Permintaan ditolak.',
+      );
+      setModal(null);
+      loadRequests();
+    } catch (err) {
+      setError(err?.message || 'Keputusan gagal disimpan.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [decision, getApi, outletId, loadRequests]);
 
   return (
     <ScreenFrame>
       <ScrollView
-        contentContainerStyle={styles.page}
-        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadRequests} />}
       >
         <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>Persediaan · {role}</Text>
-            <Text style={styles.title}>Permintaan stok internal</Text>
-            <Text style={styles.subtitle}>{outlet?.outletName}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            <PrimaryButton label="Muat ulang" secondary onPress={loadData} />
-            <PrimaryButton
-              label="Kembali"
-              secondary
-              onPress={() =>
-                router.replace(
-                  role === "MANAGER" ? ROUTES.manager : ROUTES.crew,
-                )
-              }
-            />
-          </View>
+          <Text style={styles.title}>Permintaan Stok</Text>
+          <Text style={styles.subtitle}>Outlet: {outletId}</Text>
         </View>
 
-        <Notice message={error} type="error" />
-        <Notice message={notice} type="success" />
-        {pendingPayload ? (
-          <Notice
-            message="Hasil kiriman belum diketahui. Coba lagi untuk mengirim payload dan ID transaksi yang sama."
-            type="info"
+        {error && !modal && <Notice message={error} type="error" />}
+
+        {role === 'CREW' && (
+          <BaseButton label="Buat Permintaan Stok" onPress={openCreate} fullWidth size="lg" />
+        )}
+
+        <Text style={styles.sectionTitle}>Permintaan Aktif</Text>
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={colors.light.primary} />
+            <Text style={styles.text}>Memuat permintaan…</Text>
+          </View>
+        ) : requests.length === 0 ? (
+          <EmptyState
+            icon={<Text style={styles.icon}>📦</Text>}
+            title="Tidak ada permintaan"
+            subtitle="Permintaan stok akan muncul di sini."
           />
-        ) : null}
-
-        <View style={[styles.content, wideLayout && styles.wideContent]}>
-          <View style={[styles.panel, wideLayout && styles.formPanel]}>
-            <Text style={styles.sectionTitle}>Ajukan kebutuhan</Text>
-            <Text style={styles.helper}>
-              Permintaan ini hanya berlaku di outlet aktif dan tidak mengubah
-              saldo stok saat disetujui.
-            </Text>
-            {loading ? (
-              <Text style={styles.helper}>Memuat item inventaris…</Text>
-            ) : stocks.length === 0 ? (
-              <Text style={styles.helper}>
-                Belum ada item inventaris aktif untuk dipilih.
-              </Text>
-            ) : (
-              <View style={styles.itemList}>
-                {stocks.map((item) => {
-                  const selected =
-                    selectedItems[item.inventoryItemId] !== undefined;
-                  return (
-                    <View key={item.inventoryItemId} style={styles.itemRow}>
-                      <Pressable
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: selected }}
-                        disabled={formDisabled}
-                        onPress={() => toggleItem(item.inventoryItemId)}
-                        style={[
-                          styles.itemSelect,
-                          selected && styles.itemSelected,
-                          formDisabled && styles.disabled,
-                        ]}
-                      >
-                        <Text style={styles.itemName}>{item.name}</Text>
-                        <Text style={styles.itemMeta}>
-                          Stok saat ini: {item.quantity} {item.unit}
-                        </Text>
-                        <Text style={styles.itemAction}>
-                          {selected ? "Dipilih" : "Pilih item"}
-                        </Text>
-                      </Pressable>
-                      {selected ? (
-                        <View style={styles.quantityField}>
-                          <Text style={styles.label}>
-                            Jumlah diminta ({item.unit})
-                          </Text>
-                          <TextInput
-                            accessibilityLabel={`Jumlah ${item.name}`}
-                            editable={!formDisabled}
-                            keyboardType="decimal-pad"
-                            onChangeText={(value) =>
-                              setSelectedItems((current) => ({
-                                ...current,
-                                [item.inventoryItemId]: value,
-                              }))
-                            }
-                            style={styles.input}
-                            value={selectedItems[item.inventoryItemId]}
-                          />
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })}
+        ) : (
+          requests.map((r) => (
+            <Card key={r.id} style={styles.requestCard}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.requestTitle}>
+                  {r.items?.[0]?.itemName || 'Tanpa item'}
+                </Text>
+                <Badge label={statusLabel(r.status)} />
               </View>
-            )}
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Catatan (opsional)</Text>
-              <TextInput
-                accessibilityLabel="Catatan permintaan"
-                editable={!formDisabled}
-                maxLength={500}
-                multiline
-                onChangeText={setNote}
-                style={[styles.input, styles.multiline]}
-                value={note}
-              />
-            </View>
-            {pendingPayload ? (
-              <Text style={styles.helper}>
-                Form dikunci agar retry menggunakan data dan ID transaksi yang
-                sama.
+              <Text style={styles.requestMeta}>
+                Qty: {r.items?.[0]?.quantity || 0}
+                {r.note ? ` · ${r.note}` : ''}
               </Text>
-            ) : null}
-            <PrimaryButton
-              label="Kirim permintaan"
-              disabled={formDisabled}
-              loading={saving}
-              onPress={submitRequest}
-            />
-          </View>
-
-          <View style={[styles.panel, wideLayout && styles.listPanel]}>
-            <Text style={styles.sectionTitle}>Riwayat permintaan</Text>
-            {loading ? (
-              <Text style={styles.helper}>Memuat permintaan…</Text>
-            ) : requests.length === 0 ? (
-              <Text style={styles.helper}>Belum ada permintaan stok.</Text>
-            ) : (
-              requests.map((request) => (
-                <View key={request.id} style={styles.requestCard}>
-                  <View style={styles.requestHeading}>
-                    <Text style={styles.requestStatus}>
-                      {STATUS_LABELS[request.status]}
-                    </Text>
-                    <Text style={styles.requestDate}>
-                      {new Date(request.createdAt).toLocaleString("id-ID")}
-                    </Text>
-                  </View>
-                  <Text style={styles.requester}>
-                    Diajukan oleh {request.requestedBy?.name ?? "Crew"}
-                  </Text>
-                  {request.items.map((item) => (
-                    <Text key={item.id} style={styles.requestItem}>
-                      {item.itemName}: {item.quantity} {item.unit}
-                    </Text>
-                  ))}
-                  {request.note ? (
-                    <Text style={styles.helper}>Catatan: {request.note}</Text>
-                  ) : null}
-                  {request.decisionNote ? (
-                    <Text style={styles.helper}>
-                      Catatan Manager: {request.decisionNote}
-                    </Text>
-                  ) : null}
-                  {canDecide && request.status === "PENDING" ? (
-                    <View style={styles.decisionActions}>
-                      <PrimaryButton
-                        label="Setujui"
-                        disabled={saving}
-                        onPress={() => decideRequest(request, "APPROVED")}
-                      />
-                      <PrimaryButton
-                        label="Tolak"
-                        secondary
-                        disabled={saving}
-                        onPress={() => decideRequest(request, "REJECTED")}
-                      />
-                    </View>
-                  ) : null}
+              {role === 'MANAGER' && r.status === 'PENDING' && (
+                <View style={styles.rowActions}>
+                  <TouchableOpacity
+                    style={[styles.action, styles.actionApprove]}
+                    onPress={() => openDecision(r, 'APPROVED')}
+                  >
+                    <Text style={[styles.actionText, styles.actionApproveText]}>Setujui</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.action, styles.actionReject]}
+                    onPress={() => openDecision(r, 'REJECTED')}
+                  >
+                    <Text style={[styles.actionText, styles.actionRejectText]}>Tolak</Text>
+                  </TouchableOpacity>
                 </View>
-              ))
-            )}
-          </View>
-        </View>
+              )}
+            </Card>
+          ))
+        )}
       </ScrollView>
+
+      <Modal
+        visible={modal === 'create'}
+        onClose={() => setModal(null)}
+        title="Buat Permintaan Stok"
+        subtitle="Pilih item dan jumlah yang dibutuhkan."
+        footer={
+          <BaseButton label="Kirim Permintaan" onPress={handleCreate} loading={submitting} fullWidth size="lg" />
+        }
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+          <Text style={styles.modalLabel}>Item Stok</Text>
+          <View style={styles.chipRow}>
+            {stocks.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.chip, form.inventoryItemId === item.id && styles.chipActive]}
+                onPress={() => setForm({ ...form, inventoryItemId: item.id })}
+              >
+                <Text style={[styles.chipText, form.inventoryItemId === item.id && styles.chipTextActive]}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Input label="Jumlah" value={form.quantity} onChangeText={(v) => setForm({ ...form, quantity: v })} placeholder="0" keyboardType="numeric" />
+          <Input label="Catatan" value={form.note} onChangeText={(v) => setForm({ ...form, note: v })} placeholder="Opsional" />
+        </View>
+      </Modal>
+
+      <Modal
+        visible={modal === 'decision'}
+        onClose={() => setModal(null)}
+        title={decision?.status === 'APPROVED' ? 'Setujui Permintaan' : 'Tolak Permintaan'}
+        subtitle="Keputusan akan dicatat di audit log."
+        footer={
+          <BaseButton
+            label={decision?.status === 'APPROVED' ? 'Setujui' : 'Tolak'}
+            onPress={handleDecision}
+            loading={submitting}
+            fullWidth
+            size="lg"
+            variant={decision?.status === 'APPROVED' ? 'primary' : 'danger'}
+          />
+        }
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+          <Text style={styles.modalText}>
+            {decision?.status === 'APPROVED'
+              ? 'Stok akan dikurangi dari gudang pusat sesuai jumlah permintaan.'
+              : 'Permintaan akan ditutup tanpa perubahan stok.'}
+          </Text>
+        </View>
+      </Modal>
     </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flexGrow: 1,
-    width: "100%",
-    maxWidth: 1280,
-    alignSelf: "center",
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: spacing.md,
-  },
-  headerActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  eyebrow: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
+  container: { padding: spacing.lg, gap: spacing.md },
+  header: { gap: spacing.sm },
   title: {
-    color: colors.textPrimary,
-    fontSize: 28,
-    fontWeight: "800",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
   },
   subtitle: {
-    color: colors.textSecondary,
-    fontSize: 16,
-    marginTop: spacing.xs,
-  },
-  content: {
-    gap: spacing.md,
-  },
-  wideContent: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  panel: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  formPanel: {
-    flex: 1.1,
-    minWidth: 360,
-  },
-  listPanel: {
-    flex: 1,
-    minWidth: 360,
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
   },
   sectionTitle: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "800",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    marginTop: spacing.lg,
   },
-  helper: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  text: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
   },
-  itemList: {
-    gap: spacing.sm,
+  icon: { fontSize: 40 },
+  requestCard: { gap: spacing.sm },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  requestTitle: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.light.textPrimary,
+    flex: 1,
   },
-  itemRow: {
-    borderBottomWidth: 1,
-    borderColor: colors.border,
-    paddingBottom: spacing.sm,
-    gap: spacing.sm,
+  requestMeta: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  itemSelect: {
-    minHeight: 56,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    padding: spacing.md,
-    gap: 4,
+  rowActions: { flexDirection: 'row', gap: spacing.sm },
+  action: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.light.surfaceSecondary,
+    alignItems: 'center',
   },
-  itemSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceMuted,
+  actionApprove: { backgroundColor: colors.light.successSurface },
+  actionReject: { backgroundColor: colors.light.dangerSurface },
+  actionText: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  itemName: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: "700",
+  actionApproveText: { color: colors.light.success },
+  actionRejectText: { color: colors.light.danger },
+  modalContent: { padding: spacing.md, gap: spacing.md },
+  modalLabel: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  itemMeta: {
-    color: colors.textSecondary,
-    fontSize: 13,
+  modalText: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  itemAction: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  quantityField: {
-    gap: spacing.xs,
-  },
-  field: {
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  input: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    color: colors.textPrimary,
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
     paddingHorizontal: spacing.md,
-    fontSize: 16,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surface,
   },
-  multiline: {
-    minHeight: 84,
-    paddingTop: spacing.sm,
-    textAlignVertical: "top",
+  chipActive: { backgroundColor: colors.light.primary, borderColor: colors.light.primary },
+  chipText: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
   },
-  disabled: {
-    opacity: 0.55,
-  },
-  requestCard: {
-    borderTopWidth: 1,
-    borderColor: colors.border,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
-  },
-  requestHeading: {
-    gap: spacing.xs,
-  },
-  requestStatus: {
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  requestDate: {
-    color: colors.textSecondary,
-    fontSize: 12,
-  },
-  requester: {
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  requestItem: {
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  decisionActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    paddingTop: spacing.xs,
-  },
+  chipTextActive: { color: colors.light.onPrimary },
 });
-
-export default StockRequestScreen;

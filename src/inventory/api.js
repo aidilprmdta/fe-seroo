@@ -122,6 +122,9 @@ export function createInventoryApi({ request }) {
     async getStocks(outletId) {
       return assertStocks(await request(`${outletPath(outletId)}/stocks`));
     },
+    async getStockAlerts(outletId) {
+      return request(`${outletPath(outletId)}/stocks/alerts`);
+    },
     async getMovements(outletId) {
       return assertMovements(
         await request(`${outletPath(outletId)}/stock-movements`),

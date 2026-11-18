@@ -1,487 +1,177 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Crypto from "expo-crypto";
-import * as Network from "expo-network";
-import { router } from "expo-router";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
-import { useAuth } from "../src/auth/AuthContext";
-import { ROUTES } from "../src/auth/routePolicy";
-import Notice from "../src/components/Notice";
-import PrimaryButton from "../src/components/PrimaryButton";
-import ScreenFrame from "../src/components/ScreenFrame";
-import { createInventoryApi } from "../src/inventory/api";
-import { wasteOutbox } from "../src/inventory/nativeWasteOutbox";
-import { canReachInternet, classifyOutboxFailure, retryDelayMs } from "../src/pos/cart";
-import { colors, spacing } from "../src/theme/tokens";
+// WasteScreen — pencatatan & riwayat waste (sesuai schema backend)
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, Alert } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import { useAuth } from '../src/auth/AuthContext';
+import { createWasteApi } from '../src/api/waste';
+import { createApiClient } from '../src/api/api';
+import { colors, spacing, typography, radii } from '../src/theme/tokens';
+import Card from '../src/components/Card';
+import ListItem from '../src/components/ListItem';
+import Input from '../src/components/Input';
+import BaseButton from '../src/components/BaseButton';
+import EmptyState from '../src/components/EmptyState';
+import ScreenFrame from '../src/components/ScreenFrame';
+import Notice from '../src/components/Notice';
 
-const QUANTITY_PATTERN = /^(0|[1-9]\d{0,8})(\.\d{1,3})?$/;
-
-function statusLabel(status) {
-  switch (status) {
-    case "queued":
-      return "Menunggu koneksi";
-    case "syncing":
-      return "Mengirim ke server";
-    case "synced":
-      return "Tersimpan di server";
-    case "retryable_failure":
-      return "Gagal sementara · akan dicoba lagi";
-    case "needs_review":
-      return "Perlu diperiksa";
-    default:
-      return "Tersimpan di server";
-  }
+function uuidv4() {
+  const bytes = Crypto.getRandomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function FormField({ label, value, onChangeText, disabled, numeric = false }) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        editable={!disabled}
-        keyboardType={numeric ? "decimal-pad" : "default"}
-        onChangeText={onChangeText}
-        style={[styles.input, disabled && styles.inputDisabled]}
-        value={value}
-      />
-    </View>
-  );
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function toIsoDate(dateKey) {
+  return new Date(`${dateKey}T00:00:00+07:00`).toISOString();
 }
 
 export default function WasteScreen() {
-  const { user, selection, apiRequest } = useAuth();
-  const { width } = useWindowDimensions();
+  const { selection } = useAuth();
   const outletId = selection.activeOutletId;
-  const role = selection.activeRole;
-  const api = useMemo(() => createInventoryApi({ request: apiRequest }), [apiRequest]);
-  const [inventoryItems, setInventoryItems] = useState([]);
-  const [selectedInventoryItemId, setSelectedInventoryItemId] = useState(null);
-  const [itemName, setItemName] = useState("");
-  const [category, setCategory] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [unit, setUnit] = useState("");
-  const [description, setDescription] = useState("");
-  const [serverWaste, setServerWaste] = useState([]);
-  const [localRecords, setLocalRecords] = useState([]);
-  const [networkAvailable, setNetworkAvailable] = useState(false);
+
+  const [wasteRecords, setWasteRecords] = useState([]);
+  const [itemName, setItemName] = useState('');
+  const [category, setCategory] = useState('Bahan Baku');
+  const [quantity, setQuantity] = useState('');
+  const [unit, setUnit] = useState('pcs');
+  const [date, setDate] = useState(todayKey());
+  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const onlineRef = useRef(false);
-  const syncingRef = useRef(false);
-  const submittingRef = useRef(false);
-  const wideLayout = width >= 900;
 
-  const refreshLocalRecords = useCallback(async () => {
-    setLocalRecords(
-      await wasteOutbox.listRecent({ ownerUserId: user.id, outletId }),
-    );
-  }, [outletId, user.id]);
+  const getApi = useCallback(() => {
+    const client = createApiClient();
+    return createWasteApi({ request: client });
+  }, []);
 
-  const refreshRecords = useCallback(async () => {
-    await wasteOutbox.initialize();
-    await refreshLocalRecords();
-    if (onlineRef.current) {
-      try {
-        const [wasteResult, stockResult] = await Promise.all([
-          api.getWaste(outletId),
-          api.getStocks(outletId),
-        ]);
-        setServerWaste(wasteResult.waste);
-        setInventoryItems(stockResult.stocks);
-      } catch (loadError) {
-        setError(loadError.message);
-      }
-    }
-  }, [api, outletId, refreshLocalRecords]);
-
-  const syncPending = useCallback(async (force = false) => {
-    if (!onlineRef.current || syncingRef.current) return;
-    syncingRef.current = true;
-    setSyncing(true);
+  const loadWaste = useCallback(async () => {
     try {
-      await wasteOutbox.initialize();
-      const pending = await wasteOutbox.listPending({
-        ownerUserId: user.id,
-        outletId,
-        force,
-      });
-      for (const record of pending) {
-        await wasteOutbox.setStatus({
-          clientTransactionId: record.clientTransactionId,
-          ownerUserId: user.id,
-          outletId,
-          status: "syncing",
-        });
-        await refreshLocalRecords();
-        try {
-          const result = await api.createWaste(outletId, record.payload);
-          await wasteOutbox.setStatus({
-            clientTransactionId: record.clientTransactionId,
-            ownerUserId: user.id,
-            outletId,
-            status: "synced",
-            serverWaste: result.waste,
-          });
-        } catch (syncError) {
-          const status = classifyOutboxFailure(syncError);
-          await wasteOutbox.setStatus({
-            clientTransactionId: record.clientTransactionId,
-            ownerUserId: user.id,
-            outletId,
-            status,
-            errorCode: syncError.code ?? "SYNC_FAILED",
-            retryCount:
-              status === "retryable_failure"
-                ? (record.retryCount ?? 0) + 1
-                : record.retryCount,
-            nextRetryAt:
-              status === "retryable_failure"
-                ? new Date(Date.now() + retryDelayMs(record.retryCount ?? 0)).toISOString()
-                : null,
-          });
-          await refreshLocalRecords();
-          if (syncError.status === 401 || syncError.status === 403) {
-            setError(syncError.message);
-            break;
-          }
-        }
-        await refreshLocalRecords();
-      }
-      await refreshRecords();
-    } catch (syncError) {
-      setError(syncError.message);
+      const data = await getApi().listWaste(outletId, { pageSize: 100 });
+      setWasteRecords(data?.data?.waste || data?.data?.wasteRecords || []);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Riwayat waste gagal dimuat.');
     } finally {
-      syncingRef.current = false;
-      setSyncing(false);
+      setLoading(false);
+      setRefreshing(false);
     }
-  }, [api, outletId, refreshLocalRecords, refreshRecords, user.id]);
-
-  const handleNetworkState = useCallback(
-    async (networkState) => {
-      const available = canReachInternet(networkState);
-      onlineRef.current = available;
-      setNetworkAvailable(available);
-      await refreshRecords();
-      if (available) await syncPending();
-    },
-    [refreshRecords, syncPending],
-  );
+  }, [outletId, getApi]);
 
   useEffect(() => {
-    let active = true;
-    wasteOutbox
-      .initialize()
-      .then(() => refreshRecords())
-      .catch((storageError) => {
-        if (active) setError(storageError.message);
-      });
-    Network.getNetworkStateAsync()
-      .then((state) => active && handleNetworkState(state))
-      .catch(() => {
-        if (active) {
-          onlineRef.current = false;
-          setNetworkAvailable(false);
-          setError("Status jaringan tidak dapat diperiksa. Coba muat ulang.");
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    const subscription = Network.addNetworkStateListener((state) => {
-      if (active) handleNetworkState(state);
-    });
-    return () => {
-      active = false;
-      subscription.remove();
-    };
-  }, [handleNetworkState, refreshRecords]);
+    loadWaste();
+  }, [loadWaste]);
 
-  const chooseInventoryItem = (item) => {
-    setSelectedInventoryItemId(item?.inventoryItemId ?? null);
-    if (item) {
-      setItemName(item.name);
-      setUnit(item.unit);
-    } else {
-      setItemName("");
-      setUnit("");
-    }
-  };
-
-  const submitWaste = async () => {
-    if (submittingRef.current) return;
-    if (
-      !itemName.trim() ||
-      !category.trim() ||
-      !QUANTITY_PATTERN.test(quantity) ||
-      Number(quantity) <= 0 ||
-      !unit.trim()
-    ) {
-      setError("Lengkapi nama item, kategori, jumlah, dan satuan dengan benar.");
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+    if (!itemName.trim() || !category.trim() || !(Number(quantity) > 0) || !unit.trim()) {
+      setError('Nama item, kategori, jumlah, dan unit wajib diisi.');
       return;
     }
-
-    submittingRef.current = true;
     setSubmitting(true);
-    setError(null);
-    setNotice(null);
     try {
-      let online = false;
-      try {
-        online = canReachInternet(await Network.getNetworkStateAsync());
-      } catch {
-        online = false;
-      }
-      onlineRef.current = online;
-      setNetworkAvailable(online);
-
-      const payload = {
-        clientTransactionId: Crypto.randomUUID(),
-        ...(selectedInventoryItemId
-          ? { inventoryItemId: selectedInventoryItemId }
-          : {}),
+      await getApi().createWaste(outletId, {
+        clientTransactionId: uuidv4(),
         itemName: itemName.trim(),
         category: category.trim(),
-        quantity,
+        quantity: String(Number(quantity)),
         unit: unit.trim(),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        wasteDate: new Date().toISOString(),
-      };
-      await wasteOutbox.enqueue({ ownerUserId: user.id, outletId, payload });
-      setItemName("");
-      setCategory("");
-      setQuantity("");
-      setUnit("");
-      setDescription("");
-      setSelectedInventoryItemId(null);
-      await refreshRecords();
-
-      if (online) {
-        await syncPending();
-      } else {
-        setNotice("Catatan waste disimpan di perangkat dan menunggu koneksi untuk disinkronkan.");
-      }
-    } catch (submitError) {
-      setError(submitError.message);
+        description: description.trim() || undefined,
+        wasteDate: toIsoDate(date),
+      });
+      setItemName('');
+      setQuantity('');
+      setDescription('');
+      setDate(todayKey());
+      await loadWaste();
+      Alert.alert('Berhasil', 'Waste berhasil dicatat.');
+    } catch (err) {
+      setError(err?.message || 'Waste gagal disimpan.');
     } finally {
-      submittingRef.current = false;
       setSubmitting(false);
     }
-  };
-
-  const remoteClientIds = new Set(
-    serverWaste.map((record) => record.clientTransactionId).filter(Boolean),
-  );
-  const visibleLocal = localRecords.filter(
-    (record) => !remoteClientIds.has(record.clientTransactionId),
-  );
-  const records = [
-    ...serverWaste.map((record) => ({
-      ...record,
-      localStatus: null,
-      date: record.wasteDate,
-    })),
-    ...visibleLocal.map((record) => {
-      const saved = record.serverWaste ?? record.payload;
-      return {
-        ...saved,
-        clientTransactionId: record.clientTransactionId,
-        localStatus: record.status,
-        date: saved.wasteDate ?? record.createdAt,
-      };
-    }),
-  ].sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-  const selectedOutlet = user.memberships.find(
-    (membership) => membership.outletId === outletId,
-  );
+  }, [itemName, category, quantity, unit, description, date, outletId, getApi, loadWaste]);
 
   return (
     <ScreenFrame>
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadWaste} />}
+      >
         <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>Waste · {role}</Text>
-            <Text style={styles.title}>Catatan waste</Text>
-            <Text style={styles.subtitle}>{selectedOutlet?.outletName}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            <Text style={styles.connection}>
-              {networkAvailable ? "Terhubung" : "Offline"}
-            </Text>
-            {syncing ? <Text style={styles.connection}>Menyinkronkan...</Text> : null}
-            <PrimaryButton
-              label="Stok"
-              secondary
-              onPress={() => router.push(ROUTES.inventory)}
-            />
-            <PrimaryButton
-              label="Kembali"
-              secondary
-              onPress={() =>
-                router.replace(role === "MANAGER" ? ROUTES.manager : ROUTES.crew)
-              }
-            />
-          </View>
+          <Text style={styles.title}>Pencatatan Waste</Text>
+          <Text style={styles.subtitle}>Outlet: {outletId}</Text>
         </View>
 
-        <Notice message={error} />
-        <Notice message={notice} type="info" />
+        {error && <Notice message={error} type="error" />}
 
-        <View style={[styles.columns, wideLayout && styles.wideColumns]}>
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Catat waste</Text>
-            <Text style={styles.helper}>
-              Catatan waste tidak mengurangi saldo stok secara otomatis.
-            </Text>
-            <Text style={styles.label}>Pilih item inventaris (opsional)</Text>
-            <View style={styles.itemChoices}>
-              <Pressable
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selectedInventoryItemId === null }}
-                onPress={() => chooseInventoryItem(null)}
-                style={[
-                  styles.choice,
-                  selectedInventoryItemId === null && styles.choiceSelected,
-                ]}
-              >
-                <Text style={styles.choiceText}>Input manual</Text>
-              </Pressable>
-              {inventoryItems.map((item) => (
-                <Pressable
-                  key={item.inventoryItemId}
-                  accessibilityRole="radio"
-                  accessibilityState={{
-                    checked: selectedInventoryItemId === item.inventoryItemId,
-                  }}
-                  onPress={() => chooseInventoryItem(item)}
-                  style={[
-                    styles.choice,
-                    selectedInventoryItemId === item.inventoryItemId &&
-                      styles.choiceSelected,
-                  ]}
-                >
-                  <Text style={styles.choiceText}>{item.name} · {item.unit}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <FormField
-              label="Nama item"
-              value={itemName}
-              onChangeText={setItemName}
-              disabled={Boolean(selectedInventoryItemId)}
-            />
-            <FormField label="Kategori / alasan" value={category} onChangeText={setCategory} />
-            <View style={styles.formRow}>
-              <View style={styles.formHalf}>
-                <FormField label="Jumlah" value={quantity} onChangeText={setQuantity} numeric />
-              </View>
-              <View style={styles.formHalf}>
-                <FormField
-                  label="Satuan"
-                  value={unit}
-                  onChangeText={setUnit}
-                  disabled={Boolean(selectedInventoryItemId)}
-                />
-              </View>
-            </View>
-            <FormField label="Keterangan (opsional)" value={description} onChangeText={setDescription} />
-            <PrimaryButton
-              label="Simpan catatan waste"
-              loading={submitting}
-              onPress={submitWaste}
-            />
-            <PrimaryButton
-              label="Coba sinkronkan sekarang"
-              secondary
-              disabled={!networkAvailable || syncing}
-              loading={syncing}
-              onPress={() => syncPending(true)}
-            />
-          </View>
+        <Card style={styles.formCard}>
+          <Text style={styles.sectionTitle}>Catat Waste</Text>
+          <Input label="Nama item" value={itemName} onChangeText={setItemName} placeholder="Contoh: Teh tarik tumpah" />
+          <Input label="Kategori" value={category} onChangeText={setCategory} placeholder="Bahan Baku / Produk Batal" />
+          <Input label="Kuantitas" value={quantity} onChangeText={setQuantity} placeholder="0" keyboardType="numeric" />
+          <Input label="Unit" value={unit} onChangeText={setUnit} placeholder="pcs / cup / kg" />
+          <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
+          <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Alasan waste (opsional)" />
+          <BaseButton label="Simpan Waste" onPress={handleSubmit} loading={submitting} fullWidth size="lg" />
+        </Card>
 
-          <View style={styles.panel}>
-            <View style={styles.listHeader}>
-              <Text style={styles.sectionTitle}>
-                {role === "MANAGER" ? "Laporan waste outlet" : "Catatan waste saya"}
-              </Text>
-              <Text style={styles.helper}>Maksimal 100 catatan terbaru</Text>
-            </View>
-            {loading ? <Text style={styles.helper}>Memuat catatan...</Text> : null}
-            {!loading && records.length === 0 ? (
-              <Text style={styles.empty}>
-                {networkAvailable
-                  ? "Belum ada catatan waste."
-                  : "Belum ada catatan lokal. Sambungkan ke internet untuk memuat laporan server."}
-              </Text>
-            ) : null}
-            {records.map((record, index) => (
-              <View
-                key={record.id ?? record.clientTransactionId ?? `${record.itemName}-${index}`}
-                style={styles.record}
-              >
-                <View style={styles.recordHeading}>
-                  <Text style={styles.itemName}>{record.itemName}</Text>
-                  <Text style={styles.quantity}>{record.quantity} {record.unit}</Text>
-                </View>
-                <Text style={styles.helper}>
-                  {record.category}
-                  {record.description ? ` · ${record.description}` : ""}
-                </Text>
-                <Text style={styles.helper}>
-                  {record.createdBy?.name ? `${record.createdBy.name} · ` : ""}
-                  {new Date(record.date).toLocaleString("id-ID")}
-                </Text>
-                <Text style={styles.status}>
-                  {statusLabel(record.localStatus)}
-                </Text>
-              </View>
-            ))}
+        <Text style={styles.sectionTitle}>Riwayat Waste</Text>
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={colors.light.primary} />
           </View>
-        </View>
+        ) : wasteRecords.length === 0 ? (
+          <EmptyState icon={<Text style={styles.icon}>🗑️</Text>} title="Belum ada catatan" subtitle="Waste akan muncul di sini setelah dicatat." />
+        ) : (
+          wasteRecords.map((record) => (
+            <ListItem
+              key={record.id}
+              title={`${record.itemName || 'Item'} · ${record.quantity} ${record.unit || ''}`}
+              subtitle={`${record.category || '-'} · ${record.description || 'Tanpa keterangan'}`}
+              right={<Text style={styles.date}>{(record.wasteDate || record.createdAt || '').slice(0, 10)}</Text>}
+            />
+          ))
+        )}
       </ScrollView>
     </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, width: "100%", maxWidth: 1280, alignSelf: "center", padding: spacing.lg, gap: spacing.lg },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.md },
-  headerCopy: { flex: 1, minWidth: 220, gap: spacing.xs },
-  headerActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
-  eyebrow: { color: colors.textSecondary, fontSize: 13, fontWeight: "700", textTransform: "uppercase" },
-  title: { color: colors.textPrimary, fontSize: 28, fontWeight: "800" },
-  subtitle: { color: colors.textSecondary, fontSize: 15 },
-  connection: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
-  columns: { gap: spacing.md },
-  wideColumns: { flexDirection: "row", alignItems: "flex-start" },
-  panel: { flex: 1, minWidth: 320, gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface, padding: spacing.lg },
-  sectionTitle: { color: colors.textPrimary, fontSize: 19, fontWeight: "700" },
-  helper: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
-  empty: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
-  label: { color: colors.textPrimary, fontSize: 14, fontWeight: "700" },
-  field: { flex: 1, gap: spacing.xs },
-  input: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: spacing.md, color: colors.textPrimary, backgroundColor: colors.surface },
-  inputDisabled: { backgroundColor: colors.surfaceMuted, color: colors.textSecondary },
-  itemChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  choice: { minHeight: 48, justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: spacing.md, backgroundColor: colors.surface },
-  choiceSelected: { borderColor: colors.primary, backgroundColor: colors.surfaceMuted },
-  choiceText: { color: colors.textPrimary, fontSize: 14, fontWeight: "600" },
-  formRow: { flexDirection: "row", gap: spacing.sm },
-  formHalf: { flex: 1 },
-  listHeader: { gap: spacing.xs },
-  record: { gap: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: spacing.md },
-  recordHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
-  itemName: { flex: 1, color: colors.textPrimary, fontSize: 16, fontWeight: "700" },
-  quantity: { color: colors.textPrimary, fontSize: 16, fontWeight: "700" },
-  status: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
+  container: { padding: spacing.lg, gap: spacing.md },
+  header: { gap: spacing.sm },
+  title: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
+  },
+  subtitle: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
+  },
+  formCard: { gap: spacing.md },
+  sectionTitle: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    marginTop: spacing.lg,
+  },
+  loading: { padding: spacing.xl, alignItems: 'center' },
+  icon: { fontSize: 40 },
+  date: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+  },
 });

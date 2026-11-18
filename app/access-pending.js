@@ -1,49 +1,69 @@
-import { StyleSheet, Text, View } from "react-native";
-import LogoutButton from "../src/components/LogoutButton";
-import ScreenFrame from "../src/components/ScreenFrame";
-import { colors, spacing } from "../src/theme/tokens";
+// AccessPendingScreen — pending access approval screen
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { useAuth } from '../src/auth/AuthContext';
+import { colors, spacing, typography } from '../src/theme/tokens';
+import ScreenFrame from '../src/components/ScreenFrame';
 
 export default function AccessPendingScreen() {
+  const { user } = useAuth();
+
   return (
     <ScreenFrame>
-      <View style={styles.content}>
-        <Text style={styles.eyebrow}>Seroo · Akses akun</Text>
-        <Text style={styles.title}>Akses outlet belum tersedia</Text>
-        <Text style={styles.body}>
-          Akun ini belum memiliki membership outlet yang aktif. Hubungi
-          administrator untuk meminta akses.
+      <View style={styles.container}>
+        <View style={styles.iconContainer}>
+          <Text style={styles.icon}>⏳</Text>
+        </View>
+        <Text style={styles.title}>Permintaan akses sedang diproses</Text>
+        <Text style={styles.subtitle}>
+          Admin pusat sedang meninjau akses Anda.
         </Text>
-        <LogoutButton />
+        <Text style={styles.subtitle2}>
+          Akun: {user?.name} ({user?.email})
+        </Text>
       </View>
     </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
+  container: {
     flex: 1,
-    width: "100%",
-    maxWidth: 620,
-    alignSelf: "center",
-    justifyContent: "center",
-    padding: spacing.lg,
-    gap: spacing.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
   },
-  eyebrow: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: colors.light.infoSurface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  icon: {
+    fontSize: 40,
   },
   title: {
-    color: colors.textPrimary,
-    fontSize: 28,
-    fontWeight: "800",
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
+    textAlign: 'center',
   },
-  body: {
-    color: colors.textSecondary,
-    fontSize: 16,
-    lineHeight: 24,
-    marginBottom: spacing.sm,
+  subtitle: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  subtitle2: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textTertiary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
   },
 });

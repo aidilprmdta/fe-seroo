@@ -9,6 +9,7 @@ import {
 } from "react";
 import * as SecureStore from "expo-secure-store";
 import { createAuthClient } from "./sessionClient";
+import { setAuthTokenProvider } from "../api/api";
 import {
   getInitialOutletContext,
   getSelectedMembership,
@@ -61,6 +62,11 @@ export function AuthProvider({ children }) {
   }
 
   const client = clientRef.current;
+
+  useEffect(() => {
+    setAuthTokenProvider(() => client.getAccessToken());
+    return () => setAuthTokenProvider(null);
+  }, [client]);
 
   useEffect(() => {
     let active = true;

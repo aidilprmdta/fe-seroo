@@ -11,5 +11,9 @@ export default function IndexScreen() {
   if (status !== "authenticated") {
     return <Redirect href={ROUTES.login} />;
   }
+  if (user?.mustChangePassword === true) {
+    return <Redirect href={ROUTES.changePassword} />;
+  }
   return <Redirect href={resolveLandingRoute(user.memberships, selection)} />;
 }
+

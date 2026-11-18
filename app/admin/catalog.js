@@ -264,9 +264,9 @@ export default function AdminCatalogScreen() {
           </View>
         </View>
 
-        {authNotice ? <Notice variant="info">{authNotice}</Notice> : null}
-        {error ? <Notice variant="danger">{error}</Notice> : null}
-        {successMsg ? <Notice variant="success">{successMsg}</Notice> : null}
+        {authNotice ? <Notice type="info">{authNotice}</Notice> : null}
+        {error ? <Notice type="error">{error}</Notice> : null}
+        {successMsg ? <Notice type="success">{successMsg}</Notice> : null}
 
         {loading ? (
           <View style={styles.loadingBox}>
@@ -310,9 +310,10 @@ export default function AdminCatalogScreen() {
                               <Pressable
                                 style={styles.recipeBtn}
                                 onPress={() => {
-                                  setError(null);
                                   setSuccessMsg(null);
-                                  openRecipeModal(variant, product);
+                                  setError(
+                                    "Master bahan baku & resep belum tersedia di backend. Fitur ini disembunyikan sementara agar tidak menghasilkan error.",
+                                  );
                                 }}
                               >
                                 <Text style={styles.recipeBtnText}>🧪 Kelola Resep</Text>
@@ -618,6 +619,8 @@ const styles = StyleSheet.create({
   },
   headerBtnCol: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
     gap: spacing.sm,
     alignItems: "center",
   },
