@@ -10,7 +10,7 @@ import AppShell from '../src/components/AppShell';
 const QUICK = [
   { title: 'Buat pesanan', desc: 'Mulai POS', icon: '＋', route: ROUTES.crewPos },
   { title: 'Catat waste', desc: 'Barang terbuang', icon: '↗', route: ROUTES.waste },
-  { title: 'Laporkan kehilangan', desc: 'Periksa Manager', icon: '!', route: ROUTES.waste },
+  { title: 'Laporkan kehilangan', desc: 'Periksa Manager', icon: '!', route: ROUTES.lossReports },
   { title: 'Status stok', desc: 'Tanpa jumlah rinci', icon: '○', route: ROUTES.inventory },
 ];
 

@@ -16,6 +16,7 @@ import ScreenFrame from '../src/components/ScreenFrame';
 import AppShell from '../src/components/AppShell';
 import Notice from '../src/components/Notice';
 import Modal from '../src/components/Modal';
+import { posOutbox } from '../src/pos/nativeOutbox';
 
 function uuidv4() {
   const bytes = Crypto.getRandomBytes(16);
@@ -64,6 +65,12 @@ function formatRupiah(value) {
 export default function ClosingsScreen() {
   const { user, selection } = useAuth();
   const outletId = selection.activeOutletId;
+  const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
+  const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';
+  const canPerformClosing = activeRole === 'MANAGER';
+  const navRole = isOwner ? 'ownerMitra' : 'manager';
+  const roleLabel = activeRole || 'MANAGER';
+
   const [closings, setClosings] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [mode, setMode] = useState('cash'); // cash | actual
@@ -78,6 +85,29 @@ export default function ClosingsScreen() {
   const [reopening, setReopening] = useState(false);
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [outboxSummary, setOutboxSummary] = useState({
+    waitingSyncCount: 0,
+    needsReviewCount: 0,
+    totalUnresolved: 0,
+  });
+
+  const checkPendingOutbox = useCallback(async () => {
+    if (!outletId) return;
+    try {
+      const records = await posOutbox.listRecent({ ownerUserId: user?.id, outletId });
+      const waitingSync = records.filter((r) =>
+        ['queued', 'syncing', 'retryable_failure'].includes(r.status),
+      );
+      const needsReview = records.filter((r) => r.status === 'needs_review');
+      setOutboxSummary({
+        waitingSyncCount: waitingSync.length,
+        needsReviewCount: needsReview.length,
+        totalUnresolved: waitingSync.length + needsReview.length,
+      });
+    } catch {
+      // Abaikan jika database outbox belum siap
+    }
+  }, [outletId, user?.id]);
 
   const loadClosings = useCallback(async () => {
     try {
@@ -85,12 +115,13 @@ export default function ClosingsScreen() {
       const closingsApi = createClosingsApi({ request: client });
       const data = await closingsApi.listClosings(outletId);
       setClosings(data.data?.closings || []);
+      await checkPendingOutbox();
     } catch (err) {
       setError(err?.message || 'Daftar closing gagal dimuat.');
     } finally {
       setRefreshing(false);
     }
-  }, [outletId]);
+  }, [outletId, checkPendingOutbox]);
 
   useEffect(() => {
     loadClosings();
@@ -185,11 +216,11 @@ export default function ClosingsScreen() {
 
   return (
     <AppShell
-      navRole="manager"
+      navRole={navRole}
       active="closing"
       title="Closing harian dan bulanan"
-      subtitle="Periksa selisih kas sebelum periode ditutup."
-      roleLabel="MANAGER"
+      subtitle={isOwner ? "Memantau riwayat closing dan rekap selisih kas outlet." : "Periksa selisih kas sebelum periode ditutup."}
+      roleLabel={roleLabel}
       outletLabel={selection.activeOutletId || 'Outlet'}
       scopeLabel={selection.activeOutletId || 'Outlet'}
       contentStyle={styles.container}
@@ -198,6 +229,19 @@ export default function ClosingsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadClosings} />}
       >
         {error && <Notice message={error} type="error" />}
+
+        {outboxSummary.totalUnresolved > 0 && (
+          <Notice
+            type="warning"
+            message={
+              outboxSummary.waitingSyncCount > 0 && outboxSummary.needsReviewCount > 0
+                ? `Perhatian: Terdapat ${outboxSummary.waitingSyncCount} pesanan menunggu sinkronisasi dan ${outboxSummary.needsReviewCount} pesanan memerlukan peninjauan di antrean lokal. Rekap kas server belum mencakup transaksi tersebut. Pastikan kasir menyinkronkan atau meninjau transaksi sebelum closing.`
+                : outboxSummary.waitingSyncCount > 0
+                  ? `Perhatian: Terdapat ${outboxSummary.waitingSyncCount} pesanan di antrean lokal yang belum disinkronkan ke server. Rekap kas server belum mencakup transaksi ini.`
+                  : `Perhatian: Terdapat ${outboxSummary.needsReviewCount} pesanan di antrean lokal berstatus perlu peninjauan (needs_review). Transaksi belum tercatat di server namun uang fisik kasir mungkin sudah diterima.`
+            }
+          />
+        )}
 
         {/* Mode selector */}
         <View style={styles.modeRow}>
@@ -333,7 +377,7 @@ export default function ClosingsScreen() {
                     label={c.status === 'CLOSED' ? 'Selesai' : 'Dibuka'}
                     variant={c.status === 'CLOSED' ? 'success' : 'info'}
                   />
-                  {c.status === 'CLOSED' && (
+                  {canPerformClosing && c.status === 'CLOSED' && (
                     <TouchableOpacity style={styles.reopenBtn} onPress={() => openReopen(c)}>
                       <Text style={styles.reopenText}>Reopen</Text>
                     </TouchableOpacity>
@@ -363,6 +407,19 @@ export default function ClosingsScreen() {
       >
         <View style={styles.modalContent}>
           {error && <Notice message={error} type="error" />}
+
+        {outboxSummary.totalUnresolved > 0 && (
+          <Notice
+            type="warning"
+            message={
+              outboxSummary.waitingSyncCount > 0 && outboxSummary.needsReviewCount > 0
+                ? `Perhatian: Terdapat ${outboxSummary.waitingSyncCount} pesanan menunggu sinkronisasi dan ${outboxSummary.needsReviewCount} pesanan memerlukan peninjauan di antrean lokal. Rekap kas server belum mencakup transaksi tersebut. Pastikan kasir menyinkronkan atau meninjau transaksi sebelum closing.`
+                : outboxSummary.waitingSyncCount > 0
+                  ? `Perhatian: Terdapat ${outboxSummary.waitingSyncCount} pesanan di antrean lokal yang belum disinkronkan ke server. Rekap kas server belum mencakup transaksi ini.`
+                  : `Perhatian: Terdapat ${outboxSummary.needsReviewCount} pesanan di antrean lokal berstatus perlu peninjauan (needs_review). Transaksi belum tercatat di server namun uang fisik kasir mungkin sudah diterima.`
+            }
+          />
+        )}
           <Input
             label="Alasan reopen"
             value={reopenReason}

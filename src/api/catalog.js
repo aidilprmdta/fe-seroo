@@ -1,4 +1,4 @@
-import { createApiClient } from './api';
+import { createApiClient } from './api.js';
 
 export function createCatalogApi({ request }) {
   return {
@@ -46,6 +46,17 @@ export function createCatalogApi({ request }) {
     async updateAddOn(addOnId, payload) {
       const response = await request.patch(`/admin/catalog/add-ons/${addOnId}`, payload);
       return response?.data?.addOn ?? response?.data ?? response;
+    },
+    async getProductAvailability(outletId) {
+      const response = await request.get(`/outlets/${encodeURIComponent(outletId)}/catalog/products/availability`);
+      return response?.data ?? response;
+    },
+    async setProductAvailability(outletId, productId, isAvailable) {
+      const response = await request.patch(
+        `/outlets/${encodeURIComponent(outletId)}/catalog/products/${encodeURIComponent(productId)}/availability`,
+        { isAvailable },
+      );
+      return response?.data ?? response;
     },
   };
 }

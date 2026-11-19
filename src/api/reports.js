@@ -1,4 +1,4 @@
-import { fetchText } from './api';
+import { fetchText } from './api.js';
 
 export function createReportsApi({ request }) {
   return {

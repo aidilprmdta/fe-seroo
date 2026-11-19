@@ -76,6 +76,12 @@ function GuardedStack() {
             redirectTo={landingRoute}
           >
             <Stack.Screen name="inventory" />
+          </Stack.Protected>
+
+          <Stack.Protected
+            guard={isAllowedRoute(ROUTES.waste, memberships, selection)}
+            redirectTo={landingRoute}
+          >
             <Stack.Screen name="waste" />
           </Stack.Protected>
 

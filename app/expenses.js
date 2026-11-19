@@ -40,8 +40,13 @@ function toIsoDate(dateKey) {
 }
 
 export default function ExpensesScreen() {
-  const { selection } = useAuth();
+  const { user, selection } = useAuth();
   const outletId = selection.activeOutletId;
+  const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
+  const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';
+  const canManageExpenses = activeRole === 'MANAGER';
+  const navRole = isOwner ? 'ownerMitra' : 'manager';
+  const roleLabel = activeRole || 'MANAGER';
 
   const [expenses, setExpenses] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -80,7 +85,13 @@ export default function ExpensesScreen() {
   const loadCategories = useCallback(async () => {
     try {
       const data = await getApi().getExpenseCategories();
-      const list = data?.data || [];
+      const list = Array.isArray(data?.data?.categories)
+        ? data.data.categories
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data)
+            ? data
+            : [];
       setCategories(list);
       setCategoryId((current) => current || list[0]?.id || '');
     } catch (err) {
@@ -197,11 +208,11 @@ export default function ExpensesScreen() {
 
   return (
     <AppShell
-      navRole="manager"
+      navRole={navRole}
       active="biaya"
       title="Pengeluaran outlet"
-      subtitle="Catat tanggal kejadian, kategori, dan nominal. Pengeluaran masuk ke rekap."
-      roleLabel="MANAGER"
+      subtitle={isOwner ? "Memantau riwayat pengeluaran dan jejak audit outlet." : "Catat tanggal kejadian, kategori, dan nominal. Pengeluaran masuk ke rekap."}
+      roleLabel={roleLabel}
       outletLabel={outletId || 'Outlet'}
       scopeLabel={outletId || 'Outlet'}
       contentStyle={styles.container}
@@ -211,27 +222,33 @@ export default function ExpensesScreen() {
       >
         {error && !modal && <Notice message={error} type="error" />}
 
-        <Card style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Catat Pengeluaran</Text>
-          <Text style={styles.label}>Kategori</Text>
-          <View style={styles.chipRow}>
-            {categories.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={[styles.chip, categoryId === item.id && styles.chipActive]}
-                onPress={() => setCategoryId(item.id)}
-              >
-                <Text style={[styles.chipText, categoryId === item.id && styles.chipTextActive]}>
-                  {item.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <Input label="Jumlah (Rp)" value={amount} onChangeText={setAmount} placeholder="0" keyboardType="numeric" />
-          <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
-          <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Keterangan pengeluaran" />
-          <BaseButton label="Simpan Pengeluaran" onPress={handleCreate} loading={submitting} fullWidth size="lg" />
-        </Card>
+        {canManageExpenses && (
+          <Card style={styles.formCard}>
+            <Text style={styles.sectionTitle}>Catat Pengeluaran</Text>
+            <Text style={styles.label}>Kategori</Text>
+            <View style={styles.chipRow}>
+              {Array.isArray(categories) && categories.length > 0 ? (
+                categories.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.chip, categoryId === item.id && styles.chipActive]}
+                    onPress={() => setCategoryId(item.id)}
+                  >
+                    <Text style={[styles.chipText, categoryId === item.id && styles.chipTextActive]}>
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.emptyCategoriesText}>Tidak ada kategori tersedia</Text>
+              )}
+            </View>
+            <Input label="Jumlah (Rp)" value={amount} onChangeText={setAmount} placeholder="0" keyboardType="numeric" />
+            <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
+            <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Keterangan pengeluaran" />
+            <BaseButton label="Simpan Pengeluaran" onPress={handleCreate} loading={submitting} fullWidth size="lg" />
+          </Card>
+        )}
 
         <Text style={styles.sectionTitle}>Riwayat Pengeluaran</Text>
         {loading ? (
@@ -254,13 +271,15 @@ export default function ExpensesScreen() {
                 Rp {formatRupiah(expense.amount)} · {expense.category?.name || '-'} · {(expense.expenseDate || '').slice(0, 10)}
               </Text>
               <View style={styles.rowActions}>
-                <TouchableOpacity style={styles.action} onPress={() => openEdit(expense)}>
-                  <Text style={styles.actionText}>Koreksi</Text>
-                </TouchableOpacity>
+                {canManageExpenses && expense.status === 'ACTIVE' && (
+                  <TouchableOpacity style={styles.action} onPress={() => openEdit(expense)}>
+                    <Text style={styles.actionText}>Koreksi</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.action} onPress={() => openAudit(expense)}>
                   <Text style={styles.actionText}>Audit</Text>
                 </TouchableOpacity>
-                {expense.status === 'ACTIVE' && (
+                {canManageExpenses && expense.status === 'ACTIVE' && (
                   <TouchableOpacity style={[styles.action, styles.actionDanger]} onPress={() => openCancel(expense)}>
                     <Text style={[styles.actionText, styles.actionDangerText]}>Batal</Text>
                   </TouchableOpacity>
@@ -419,5 +438,12 @@ const styles = StyleSheet.create({
     ...typography.weights.semibold,
     fontSize: typography.sizes.sm,
     color: colors.light.textPrimary,
+  },
+  emptyCategoriesText: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    fontStyle: 'italic',
+    paddingVertical: spacing.xs,
   },
 });

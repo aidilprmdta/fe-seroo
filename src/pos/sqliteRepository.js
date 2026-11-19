@@ -130,6 +130,22 @@ export function createSqliteRepository(openDatabaseAsync) {
       return result.changes ?? 0;
     },
 
+    async requeueSessionOrders({ ownerUserId, outletId }) {
+      const database = await getDatabase();
+      const result = await database.runAsync(
+        `UPDATE pos_order_outbox
+         SET status = 'queued', error_code = NULL, next_retry_at = NULL,
+             updated_at = ?
+         WHERE owner_user_id = ? AND outlet_id = ?
+           AND status = 'needs_review' AND error_code = ?`,
+        new Date().toISOString(),
+        ownerUserId,
+        outletId,
+        "SESSION_ENDED_REVIEW",
+      );
+      return result.changes ?? 0;
+    },
+
     async update(record) {
       const database = await getDatabase();
       const result = await database.runAsync(

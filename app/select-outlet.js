@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
-import { resolveLandingRoute } from '../src/auth/routePolicy';
+import { resolveLandingRoute, getSelectedMembership } from '../src/auth/routePolicy';
 import { OutletsApi } from '../src/api/api';
 import { createApiClient } from '../src/api/api';
 import ListItem from '../src/components/ListItem';
@@ -26,9 +26,20 @@ export default function SelectOutletScreen() {
       const client = createApiClient();
       const api = new OutletsApi(client);
       const data = await api.listOutlets();
-      setOutlets(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data?.outlets)
+        ? data.outlets
+        : Array.isArray(data)
+        ? data
+        : [];
+
+      // Keamanan: Jika list kosong dari API, berarti user tidak memiliki outlet aktif.
+      // Jangan gunakan fallback ke user.memberships karena dapat membuka akses ke outlet yang telah dicabut.
+      setOutlets(list);
     } catch (err) {
-      setError(err?.message || 'Gagal memuat outlet');
+      // Keamanan: Jika terjadi error jaringan/server, tampilkan error state dengan tombol coba lagi.
+      // Jangan fallback ke user.memberships yang basi.
+      setError(err?.message || 'Gagal memuat outlet. Periksa koneksi internet.');
+      setOutlets([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -41,8 +52,13 @@ export default function SelectOutletScreen() {
 
   const handleSelect = useCallback((outlet) => {
     selectOutlet(outlet.id);
+    const membership = getSelectedMembership(user?.memberships, outlet.id);
+    const targetRole = outlet.role || membership?.role;
     router.replace(
-      resolveLandingRoute(user?.memberships, { activeOutletId: outlet.id }),
+      resolveLandingRoute(user?.memberships, {
+        activeOutletId: outlet.id,
+        activeRole: targetRole,
+      }),
     );
   }, [selectOutlet, router, user?.memberships]);
 
@@ -96,10 +112,10 @@ export default function SelectOutletScreen() {
               <ListItem
                 key={outlet.id}
                 title={outlet.name}
-                subtitle={`Kode: ${outlet.code}`}
+                subtitle={`Kode: ${outlet.code}${outlet.role ? ` · ${outlet.role}` : ''}`}
                 leading={
                   <View style={styles.radio}>
-                    {selection.activeOutletId === outlet.id ? (
+                    {selection?.activeOutletId === outlet.id ? (
                       <Text style={styles.radioChecked}>●</Text>
                     ) : (
                       <Text style={styles.radioUnchecked}>○</Text>

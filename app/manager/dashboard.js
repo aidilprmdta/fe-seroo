@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -16,7 +17,9 @@ import Notice from "../../src/components/Notice";
 import PrimaryButton from "../../src/components/PrimaryButton";
 import ProfileButton from "../../src/components/ProfileButton";
 import ScreenFrame from "../../src/components/ScreenFrame";
+import Badge from "../../src/components/Badge";
 import { createDashboardApi } from "../../src/dashboard/api";
+import { createCatalogApi } from "../../src/api/catalog";
 import { colors, spacing } from "../../src/theme/tokens";
 
 function formatRupiah(value) {
@@ -38,7 +41,7 @@ export default function ManagerDashboardScreen() {
   const { user, selection, apiRequest, notice: authNotice } = useAuth();
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
-  const outletId = selection.activeOutletId;
+  const outletId = selection?.activeOutletId;
   const memberships = user?.memberships ?? [];
 
   const selectedOutlet = memberships.find(
@@ -51,9 +54,23 @@ export default function ManagerDashboardScreen() {
     [apiRequest],
   );
 
+  const catalogApi = useMemo(
+    () => createCatalogApi({ request: apiRequest }),
+    [apiRequest],
+  );
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
+
+  // State ketersediaan menu per outlet
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [productError, setProductError] = useState(null);
+  const [productSuccess, setProductSuccess] = useState(null);
+  const [updatingProductIds, setUpdatingProductIds] = useState({});
+  const [productSearch, setProductSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("SEMUA");
 
   const loadDashboard = useCallback(async () => {
     if (!outletId) return;
@@ -69,9 +86,73 @@ export default function ManagerDashboardScreen() {
     }
   }, [api, outletId]);
 
+  const loadProductAvailability = useCallback(async () => {
+    if (!outletId) return;
+    setLoadingProducts(true);
+    setProductError(null);
+    try {
+      const res = await catalogApi.getProductAvailability(outletId);
+      const list = res?.data?.products || res?.products || [];
+      setProducts(list);
+    } catch (err) {
+      setProductError(err.message || "Gagal memuat ketersediaan menu.");
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, [catalogApi, outletId]);
+
   useEffect(() => {
     loadDashboard();
-  }, [loadDashboard]);
+    loadProductAvailability();
+  }, [loadDashboard, loadProductAvailability]);
+
+  const handleToggleAvailability = useCallback(
+    async (productId, currentStatus) => {
+      if (updatingProductIds[productId]) return;
+      const targetStatus = !currentStatus;
+      setUpdatingProductIds((prev) => ({ ...prev, [productId]: true }));
+      setProductError(null);
+      setProductSuccess(null);
+      try {
+        await catalogApi.setProductAvailability(outletId, productId, targetStatus);
+        setProducts((prev) =>
+          prev.map((p) =>
+            p.id === productId ? { ...p, isAvailable: targetStatus } : p,
+          ),
+        );
+        setProductSuccess(
+          `Status produk berhasil diubah menjadi ${targetStatus ? "Tersedia" : "Tidak Tersedia"}.`,
+        );
+      } catch (err) {
+        setProductError(
+          err.message || "Gagal mengubah status ketersediaan produk.",
+        );
+      } finally {
+        setUpdatingProductIds((prev) => {
+          const next = { ...prev };
+          delete next[productId];
+          return next;
+        });
+      }
+    },
+    [catalogApi, outletId, updatingProductIds],
+  );
+
+  const categories = useMemo(() => {
+    const cats = new Set(products.map((p) => p.category).filter(Boolean));
+    return ["SEMUA", ...Array.from(cats)];
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchCategory =
+        selectedCategory === "SEMUA" || p.category === selectedCategory;
+      const matchSearch =
+        !productSearch.trim() ||
+        p.name.toLowerCase().includes(productSearch.trim().toLowerCase());
+      return matchCategory && matchSearch;
+    });
+  }, [products, selectedCategory, productSearch]);
 
   const dailyStatus = data?.closingStatus?.daily?.status || "OPEN";
 
@@ -154,6 +235,20 @@ export default function ManagerDashboardScreen() {
             >
               <Text style={styles.actionBtnText}>🗑️ Catatan Waste</Text>
             </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push(ROUTES.lossReports)}
+              style={styles.actionBtn}
+            >
+              <Text style={styles.actionBtnText}>⚠️ Laporan Kehilangan</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={loadProductAvailability}
+              style={styles.actionBtn}
+            >
+              <Text style={styles.actionBtnText}>📋 Ketersediaan Menu</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -197,6 +292,142 @@ export default function ManagerDashboardScreen() {
               >
                 <Text style={styles.bannerActionText}>Kelola Closing ›</Text>
               </Pressable>
+            </View>
+
+            {/* Pengaturan Ketersediaan Menu Outlet */}
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>Ketersediaan Menu Outlet</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Atur produk yang tersedia untuk dijual dan dipesan di outlet ini
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={loadProductAvailability}
+                  style={styles.refreshBtn}
+                  disabled={loadingProducts}
+                >
+                  <Text style={styles.refreshBtnText}>
+                    {loadingProducts ? "Memuat..." : "Perbarui"}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {productError ? (
+                <View style={{ marginBottom: spacing.sm }}>
+                  <Notice variant="danger">{productError}</Notice>
+                </View>
+              ) : null}
+              {productSuccess ? (
+                <View style={{ marginBottom: spacing.sm }}>
+                  <Notice variant="success">{productSuccess}</Notice>
+                </View>
+              ) : null}
+
+              {/* Filter Kategori & Pencarian */}
+              <View style={styles.filterRow}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Cari nama produk..."
+                  value={productSearch}
+                  onChangeText={setProductSearch}
+                  placeholderTextColor={colors.textSecondary}
+                />
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.categoryScroll}
+                >
+                  {categories.map((cat) => (
+                    <Pressable
+                      key={cat}
+                      onPress={() => setSelectedCategory(cat)}
+                      style={[
+                        styles.categoryChip,
+                        selectedCategory === cat && styles.categoryChipActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryChipText,
+                          selectedCategory === cat && styles.categoryChipTextActive,
+                        ]}
+                      >
+                        {cat}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Daftar Produk */}
+              {loadingProducts && products.length === 0 ? (
+                <View style={styles.loadingBox}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.loadingText}>Memuat ketersediaan menu...</Text>
+                </View>
+              ) : filteredProducts.length === 0 ? (
+                <Text style={styles.emptyActivityText}>
+                  {products.length === 0
+                    ? "Belum ada produk aktif di katalog."
+                    : "Tidak ada produk yang cocok dengan pencarian."}
+                </Text>
+              ) : (
+                <View style={styles.productList}>
+                  {filteredProducts.map((prod) => {
+                    const isBusy = Boolean(updatingProductIds[prod.id]);
+                    return (
+                      <View key={prod.id} style={styles.productRow}>
+                        <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                          <View style={styles.productTitleRow}>
+                            <Text style={styles.productName}>{prod.name}</Text>
+                            <Badge
+                              label={prod.isAvailable ? "Tersedia" : "Tidak Tersedia"}
+                              variant={prod.isAvailable ? "success" : "default"}
+                              size="sm"
+                            />
+                          </View>
+                          <Text style={styles.productMeta}>
+                            {prod.category} · {prod.variants?.length ?? 0} varian
+                          </Text>
+                        </View>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() =>
+                            handleToggleAvailability(prod.id, prod.isAvailable)
+                          }
+                          disabled={isBusy}
+                          style={[
+                            styles.toggleBtn,
+                            prod.isAvailable
+                              ? styles.toggleBtnDisable
+                              : styles.toggleBtnEnable,
+                            isBusy && styles.toggleBtnDisabled,
+                          ]}
+                        >
+                          {isBusy ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={prod.isAvailable ? "#C53030" : colors.primary}
+                            />
+                          ) : (
+                            <Text
+                              style={
+                                prod.isAvailable
+                                  ? styles.toggleTextDisable
+                                  : styles.toggleTextEnable
+                              }
+                            >
+                              {prod.isAvailable ? "Nonaktifkan" : "Aktifkan"}
+                            </Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
 
             {/* Ringkasan Penjualan & Keuangan Hari Ini */}
@@ -734,5 +965,102 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: "italic",
     color: colors.textSecondary,
+  },
+  filterRow: {
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  searchInput: {
+    height: 38,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 6,
+    paddingHorizontal: spacing.sm,
+    fontSize: 13,
+    color: colors.textPrimary,
+    backgroundColor: colors.background,
+  },
+  categoryScroll: {
+    gap: 6,
+    paddingVertical: 2,
+  },
+  categoryChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  categoryChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  categoryChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+  categoryChipTextActive: {
+    color: colors.onPrimary,
+  },
+  productList: {
+    gap: spacing.xs,
+  },
+  productRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  productTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    flexWrap: "wrap",
+    marginBottom: 2,
+  },
+  productName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  productMeta: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+  toggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    minWidth: 90,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toggleBtnEnable: {
+    backgroundColor: colors.primary,
+  },
+  toggleBtnDisable: {
+    backgroundColor: "#FDE8E8",
+    borderWidth: 1,
+    borderColor: "#F8B4B4",
+  },
+  toggleBtnDisabled: {
+    opacity: 0.6,
+  },
+  toggleTextEnable: {
+    color: colors.onPrimary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  toggleTextDisable: {
+    color: "#C53030",
+    fontSize: 11,
+    fontWeight: "700",
   },
 });

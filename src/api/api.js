@@ -1,5 +1,4 @@
 // Base API client for Seroo Mobile
-import { Platform } from 'react-native';
 
 function resolveBaseUrl() {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -17,6 +16,27 @@ const BASE_URL = resolveBaseUrl();
 const TIMEOUT = 30000;
 
 let authTokenProvider = () => null;
+let activeSessionDelegate = null;
+
+export function isPublicEndpoint(pathOrUrl = '') {
+  if (typeof pathOrUrl !== 'string') return false;
+  const clean = pathOrUrl.split('?')[0].split('#')[0];
+  return /\/auth\/(login|refresh)$/i.test(clean) ||
+         /\/(health|healthz|readyz)$/i.test(clean);
+}
+
+export function setSessionDelegate(delegate) {
+  activeSessionDelegate = delegate;
+}
+
+export function getSessionDelegate() {
+  return activeSessionDelegate;
+}
+
+export function clearSessionDelegate() {
+  activeSessionDelegate = null;
+  authTokenProvider = () => null;
+}
 
 export function setAuthTokenProvider(provider) {
   authTokenProvider = typeof provider === 'function' ? provider : () => null;
@@ -30,14 +50,37 @@ export function getAuthToken() {
   }
 }
 
-export async function fetchText(path, options = {}) {
+async function resolveAccessToken(pathOrUrl = '', options = {}) {
+  let path = pathOrUrl;
+  let opts = options;
+  if (typeof pathOrUrl === 'object' && pathOrUrl !== null) {
+    opts = pathOrUrl;
+    path = '';
+  }
+  if (opts.skipAuth || (path && isPublicEndpoint(path))) return null;
+  if (activeSessionDelegate && typeof activeSessionDelegate.getAccessToken === 'function') {
+    let token = activeSessionDelegate.getAccessToken();
+    if (!token && typeof activeSessionDelegate.refreshAccessToken === 'function') {
+      try {
+        await activeSessionDelegate.refreshAccessToken();
+        token = activeSessionDelegate.getAccessToken();
+      } catch {
+        // Biarkan request lanjut atau gagal dengan kode 401
+      }
+    }
+    if (token) return token;
+  }
+  return getAuthToken();
+}
+
+export async function fetchText(path, options = {}, isRetry = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT);
   const headers = {
     Accept: 'text/plain, text/csv, text/html',
     ...(options.headers || {}),
   };
-  const token = getAuthToken();
+  const token = await resolveAccessToken(path, options);
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -49,6 +92,31 @@ export async function fetchText(path, options = {}) {
       signal: controller.signal,
     });
     if (!response.ok) {
+      if (
+        response.status === 401 &&
+        !isRetry &&
+        !options.skipAuth &&
+        !isPublicEndpoint(path) &&
+        activeSessionDelegate
+      ) {
+        const currentToken = activeSessionDelegate.getAccessToken?.();
+        if (currentToken && currentToken !== token) {
+          clearTimeout(timeout);
+          return fetchText(path, options, true);
+        }
+        if (typeof activeSessionDelegate.refreshAccessToken === 'function') {
+          try {
+            await activeSessionDelegate.refreshAccessToken();
+            clearTimeout(timeout);
+            return fetchText(path, options, true);
+          } catch {
+            if (typeof activeSessionDelegate.expireSession === 'function') {
+              await activeSessionDelegate.expireSession().catch(() => {});
+            }
+          }
+        }
+      }
+
       let message = `Request failed with status ${response.status}`;
       try {
         const payload = await response.json();
@@ -83,7 +151,7 @@ export class ApiTimeoutError extends ApiError {
   }
 }
 
-async function fetchJson(url, options = {}) {
+async function fetchJson(url, options = {}, isRetry = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT);
 
@@ -92,7 +160,7 @@ async function fetchJson(url, options = {}) {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     };
-    const token = getAuthToken();
+    const token = await resolveAccessToken(url, options);
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -103,9 +171,30 @@ async function fetchJson(url, options = {}) {
       signal: controller.signal,
     });
 
-    clearTimeout(timeout);
-
     if (!response.ok) {
+      if (
+        response.status === 401 &&
+        !isRetry &&
+        !options.skipAuth &&
+        !isPublicEndpoint(url) &&
+        activeSessionDelegate
+      ) {
+        const currentToken = activeSessionDelegate.getAccessToken?.();
+        if (currentToken && currentToken !== token) {
+          return fetchJson(url, options, true);
+        }
+        if (typeof activeSessionDelegate.refreshAccessToken === 'function') {
+          try {
+            await activeSessionDelegate.refreshAccessToken();
+            return fetchJson(url, options, true);
+          } catch {
+            if (typeof activeSessionDelegate.expireSession === 'function') {
+              await activeSessionDelegate.expireSession().catch(() => {});
+            }
+          }
+        }
+      }
+
       let errorData = null;
       try {
         errorData = await response.json();
@@ -113,8 +202,8 @@ async function fetchJson(url, options = {}) {
         errorData = { message: 'Server Error' };
       }
       const status = response.status;
-      const code = errorData.code || `HTTP_${status}`;
-      const message = errorData.message || `Request failed with status ${status}`;
+      const code = errorData?.error?.code || errorData?.code || `HTTP_${status}`;
+      const message = errorData?.error?.message || errorData?.message || `Request failed with status ${status}`;
       throw new ApiError(message, status, code, errorData);
     }
 
@@ -132,6 +221,8 @@ async function fetchJson(url, options = {}) {
       );
     }
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -162,6 +253,9 @@ export function createApiClient({ baseUrl = BASE_URL } = {}) {
       });
     },
     async del(path, options = {}) {
+      return fetchJson(`${baseUrl}${path}`, { ...options, method: 'DELETE' });
+    },
+    async delete(path, options = {}) {
       return fetchJson(`${baseUrl}${path}`, { ...options, method: 'DELETE' });
     },
   };
@@ -229,6 +323,17 @@ export class CatalogApi {
   async getVariants(outletId, productId) {
     const response = await this.request.get(`/outlets/${outletId}/catalog/products/${productId}/variants`);
     return response.data;
+  }
+  async getProductAvailability(outletId) {
+    const response = await this.request.get(`/outlets/${encodeURIComponent(outletId)}/catalog/products/availability`);
+    return response?.data ?? response;
+  }
+  async setProductAvailability(outletId, productId, isAvailable) {
+    const response = await this.request.patch(
+      `/outlets/${encodeURIComponent(outletId)}/catalog/products/${encodeURIComponent(productId)}/availability`,
+      { isAvailable },
+    );
+    return response?.data ?? response;
   }
 }
 
@@ -418,9 +523,12 @@ export class OutletsApi {
     const response = await this.request.post(`/outlets/${outletId}/members`, data);
     return response.data;
   }
-  async removeMember(outletId, memberId) {
-    const response = await this.request.delete(`/outlets/${outletId}/members/${memberId}`);
-    return response.data;
+  async removeMember(outletId, memberId, options = {}) {
+    const path = `/outlets/${encodeURIComponent(outletId)}/members/${encodeURIComponent(memberId)}`;
+    const response = await (typeof this.request.delete === 'function'
+      ? this.request.delete(path, options)
+      : this.request.del(path, options));
+    return response?.data || response;
   }
 }
 
@@ -448,5 +556,32 @@ export class AdminApi {
   async resetAccountPassword(userId) {
     const response = await this.request.post(`/admin/accounts/${userId}/reset-password`);
     return response.data;
+  }
+}
+
+// Loss Reports API
+export class LossReportsApi {
+  constructor(request) { this.request = request; }
+  async listLossReports(outletId, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const path = query
+      ? `/outlets/${encodeURIComponent(outletId)}/loss-reports?${query}`
+      : `/outlets/${encodeURIComponent(outletId)}/loss-reports`;
+    const response = await this.request.get(path);
+    return response?.data ?? response;
+  }
+  async createLossReport(outletId, data) {
+    const response = await this.request.post(
+      `/outlets/${encodeURIComponent(outletId)}/loss-reports`,
+      data,
+    );
+    return response?.data ?? response;
+  }
+  async reviewLossReport(outletId, reportId, data) {
+    const response = await this.request.patch(
+      `/outlets/${encodeURIComponent(outletId)}/loss-reports/${encodeURIComponent(reportId)}/review`,
+      data,
+    );
+    return response?.data ?? response;
   }
 }

@@ -1,6 +1,6 @@
 // CrewPOSScreen — POS lengkap: katalog + add-on + keranjang + pembayaran + kirim order
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert, AppState } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as Network from 'expo-network';
 import { useAuth } from '../../src/auth/AuthContext';
@@ -15,7 +15,11 @@ import EmptyState from '../../src/components/EmptyState';
 import AppShell from '../../src/components/AppShell';
 import OfflineBanner from '../../src/components/OfflineBanner';
 import Card from '../../src/components/Card';
-import { readQueue, enqueueOrder, removeQueuedOrder } from '../../src/lib/offlineQueue';
+import Modal from '../../src/components/Modal';
+import { posOutbox } from '../../src/pos/nativeOutbox';
+import { createPosSyncService } from '../../src/pos/syncService';
+import { migrateJsonQueueToSqlite } from '../../src/pos/migration';
+import { createNetworkMonitor } from '../../src/pos/networkMonitor';
 
 function formatRupiah(value) {
   if (!value) return '0';
@@ -40,8 +44,9 @@ function cartKey(variantId, addOns) {
 }
 
 export default function CrewPOSScreen() {
-  const { selection } = useAuth();
-  const outletId = selection.activeOutletId;
+  const { user, selection } = useAuth();
+  const ownerUserId = user?.id;
+  const outletId = selection?.activeOutletId;
   const [view, setView] = useState('catalog');
   const [online, setOnline] = useState(true);
 
@@ -62,7 +67,11 @@ export default function CrewPOSScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [orderError, setOrderError] = useState(null);
   const [queueCount, setQueueCount] = useState(0);
+  const [needsReviewCount, setNeedsReviewCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [reviewItems, setReviewItems] = useState([]);
+  const [selectedReviewOrder, setSelectedReviewOrder] = useState(null);
 
   const loadCatalog = useCallback(async () => {
     try {
@@ -91,40 +100,104 @@ export default function CrewPOSScreen() {
     }
   }, []);
 
-  const syncQueue = useCallback(async () => {
-    const queue = await readQueue();
-    setQueueCount(queue.length);
-    if (queue.length === 0 || !(await isOnline())) return queue.length;
-
-    setSyncing(true);
+  const getSyncService = useCallback(() => {
     const client = createApiClient();
     const ordersApi = createOrdersApi({ request: client });
-    let remaining = [...queue];
+    return createPosSyncService({ outbox: posOutbox, ordersApi });
+  }, []);
 
-    for (const entry of queue) {
-      try {
-        await ordersApi.createOrder(outletId, entry.payload);
-        await removeQueuedOrder(entry.id);
-        remaining = remaining.filter((item) => item.id !== entry.id);
-      } catch (err) {
-        if (
-          ['PRICE_CHANGED', 'CATALOG_ITEM_UNAVAILABLE', 'IDEMPOTENCY_KEY_REUSED'].includes(err?.code)
-        ) {
-          await removeQueuedOrder(entry.id);
-          remaining = remaining.filter((item) => item.id !== entry.id);
-        } else {
-          break;
-        }
-      }
+  const refreshQueueSummary = useCallback(async () => {
+    if (!ownerUserId || !outletId) return;
+    try {
+      const service = getSyncService();
+      const summary = await service.getQueueSummary({ ownerUserId, outletId });
+      setQueueCount(summary.pending);
+      setNeedsReviewCount(summary.needsReview);
+    } catch {
+      // Abaikan error saat summary dibaca
+    }
+  }, [ownerUserId, outletId, getSyncService]);
+
+  const syncQueue = useCallback(async (force = false) => {
+    if (!ownerUserId || !outletId) return;
+    const reachable = await isOnline();
+    setOnline(reachable);
+    if (!reachable) {
+      await refreshQueueSummary();
+      return;
     }
 
-    setQueueCount(remaining.length);
-    setSyncing(false);
-    return remaining.length;
-  }, [outletId, isOnline]);
+    setSyncing(true);
+    try {
+      const service = getSyncService();
+      await service.syncQueue({ ownerUserId, outletId, force });
+    } finally {
+      setSyncing(false);
+      await refreshQueueSummary();
+    }
+  }, [ownerUserId, outletId, isOnline, getSyncService, refreshQueueSummary]);
 
+  const openReviewDetails = useCallback(async () => {
+    if (!ownerUserId || !outletId) return;
+    try {
+      const recent = await posOutbox.listRecent({ ownerUserId, outletId });
+      const items = recent.filter((r) => r.status === 'needs_review');
+      setReviewItems(items);
+      if (items.length > 0) {
+        setSelectedReviewOrder(items[0]);
+      }
+      setReviewModalVisible(true);
+    } catch {
+      // Abaikan error saat membaca rincian review
+    }
+  }, [ownerUserId, outletId]);
+
+  // Migrasi satu kali dari antrean JSON lama ke SQLite
   useEffect(() => {
-    syncQueue();
+    if (ownerUserId && outletId) {
+      migrateJsonQueueToSqlite({ outbox: posOutbox, ownerUserId, outletId })
+        .then(() => refreshQueueSummary())
+        .catch(() => {});
+    }
+  }, [ownerUserId, outletId, refreshQueueSummary]);
+
+  // Pemulihan antrean yang tertunda akibat sesi berakhir saat pengguna login kembali
+  useEffect(() => {
+    if (ownerUserId && outletId) {
+      posOutbox.requeueSessionOrders({ ownerUserId, outletId })
+        .then(() => {
+          refreshQueueSummary();
+          syncQueue();
+        })
+        .catch(() => {
+          syncQueue();
+        });
+    }
+  }, [ownerUserId, outletId, syncQueue, refreshQueueSummary]);
+
+  // Listener network reconnect: memicu sinkronisasi otomatis ketika koneksi kembali online
+  useEffect(() => {
+    const monitor = createNetworkMonitor({
+      getNetworkStateAsync: Network.getNetworkStateAsync,
+      onStatusChange: (status) => setOnline(status),
+      onReconnect: async () => {
+        if (ownerUserId && outletId) {
+          await syncQueue();
+        }
+      },
+    });
+    monitor.start();
+    return () => monitor.stop();
+  }, [ownerUserId, outletId, syncQueue]);
+
+  // Sinkronisasi otomatis saat aplikasi kembali aktif dari background
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        syncQueue();
+      }
+    });
+    return () => sub.remove();
   }, [syncQueue]);
 
   const toggleAddOn = useCallback((addOn) => {
@@ -232,18 +305,39 @@ export default function CrewPOSScreen() {
     };
 
     const online = await isOnline();
+    setOnline(online);
     const payload = { ...orderData, recordedOffline: !online };
 
     if (!online) {
-      await enqueueOrder(payload);
-      setQueueCount((count) => count + 1);
-      setCart([]);
-      setSelectedAddOns([]);
-      setPaidAmount('');
-      Alert.alert(
-        'Tersimpan offline',
-        'Pesanan akan dikirim otomatis saat koneksi kembali.',
-      );
+      if (paymentMethod === 'QRIS' || paymentMethod === 'SPLIT') {
+        setOrderError(
+          'Pembayaran QRIS dan Split Payment tidak dapat digunakan saat offline karena memerlukan verifikasi online real-time. Gunakan pembayaran Tunai (Cash).',
+        );
+        Alert.alert(
+          'Metode Tidak Didukung Saat Offline',
+          'Pembayaran QRIS dan Split Payment memerlukan koneksi internet untuk verifikasi real-time ke gateway pembayaran. Silakan pilih metode Tunai (Cash).',
+        );
+        return;
+      }
+
+      try {
+        await posOutbox.enqueue({
+          ownerUserId,
+          outletId,
+          payload,
+        });
+        await refreshQueueSummary();
+        setCart([]);
+        setSelectedAddOns([]);
+        setPaidAmount('');
+        setView('catalog');
+        Alert.alert(
+          'Tersimpan di Perangkat — Menunggu Sinkronisasi',
+          'Pesanan tunai berhasil disimpan di database lokal. Pesanan akan otomatis dikirim ke server saat koneksi internet tersedia kembali.',
+        );
+      } catch (err) {
+        setOrderError(err?.message || 'Gagal menyimpan pesanan ke antrean offline.');
+      }
       return;
     }
 
@@ -270,22 +364,38 @@ export default function CrewPOSScreen() {
         err?.code === 'NETWORK_TIMEOUT' ||
         err?.status === 0
       ) {
-        await enqueueOrder({ ...payload, recordedOffline: true });
-        setQueueCount((count) => count + 1);
-        setCart([]);
-        setSelectedAddOns([]);
-        setPaidAmount('');
-        Alert.alert(
-          'Tersimpan offline',
-          'Koneksi terputus. Pesanan akan dikirim otomatis nanti.',
-        );
+        if (paymentMethod === 'CASH') {
+          try {
+            await posOutbox.enqueue({
+              ownerUserId,
+              outletId,
+              payload: { ...payload, recordedOffline: true },
+            });
+            await refreshQueueSummary();
+            setCart([]);
+            setSelectedAddOns([]);
+            setPaidAmount('');
+            setView('catalog');
+            Alert.alert(
+              'Koneksi Terputus — Tersimpan di Perangkat',
+              'Koneksi jaringan terputus saat mengirim pesanan. Pesanan tunai telah disimpan dengan aman di database lokal dan akan disinkronkan otomatis nanti.',
+            );
+          } catch (enqueueErr) {
+            setOrderError(enqueueErr?.message || 'Koneksi terputus dan pesanan gagal disimpan offline.');
+          }
+        } else {
+          setOrderError('Koneksi terputus saat memproses pembayaran. Transaksi non-tunai belum dapat diverifikasi oleh server.');
+        }
       } else {
         setOrderError(err?.message || 'Pesanan gagal disimpan.');
+        if (err?.code === 'CATALOG_ITEM_UNAVAILABLE' || err?.status === 409) {
+          loadCatalog();
+        }
       }
     } finally {
       setSubmitting(false);
     }
-  }, [cart, paymentMethod, paid, total, outletId, loadCatalog, isOnline]);
+  }, [cart, paymentMethod, paid, total, outletId, ownerUserId, loadCatalog, isOnline, refreshQueueSummary]);
 
   if (loading) {
     return (
@@ -317,25 +427,45 @@ export default function CrewPOSScreen() {
         <Text style={styles.subtitle}>Outlet: {outletId}</Text>
       </View>
 
-        {!online && <OfflineBanner detail="Pesanan tetap disimpan dan akan dikirim saat koneksi kembali." />}
+        {!online && (
+          <OfflineBanner detail="Aplikasi berjalan offline. Pesanan tunai disimpan di SQLite lokal dan dikirim saat online kembali." />
+        )}
 
-      {queueCount > 0 && (
-        <Notice
-          message={`${queueCount} pesanan menunggu sinkronisasi.`}
-          type="warning"
-        />
-      )}
-      {queueCount > 0 && (
-        <TouchableOpacity
-          style={styles.syncButton}
-          onPress={syncQueue}
-          disabled={syncing}
-        >
-          <Text style={styles.syncText}>
-            {syncing ? 'Mengirim…' : 'Sinkronisasi Sekarang'}
-          </Text>
-        </TouchableOpacity>
-      )}
+        {queueCount > 0 && (
+          <Notice
+            message={`${queueCount} pesanan tunai tersimpan di perangkat — menunggu sinkronisasi.`}
+            type="warning"
+          />
+        )}
+
+        {needsReviewCount > 0 && (
+          <View style={styles.reviewBannerWrapper}>
+            <Notice
+              message={`⚠️ ${needsReviewCount} pesanan membutuhkan peninjauan (misal: menu tidak tersedia di outlet). Hubungi Manager.`}
+              type="error"
+            />
+            <TouchableOpacity
+              style={styles.reviewDetailButton}
+              onPress={openReviewDetails}
+            >
+              <Text style={styles.reviewDetailButtonText}>
+                🔍 Lihat Rincian Masalah ({needsReviewCount})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {queueCount > 0 && (
+          <TouchableOpacity
+            style={styles.syncButton}
+            onPress={() => syncQueue(true)}
+            disabled={syncing}
+          >
+            <Text style={styles.syncText}>
+              {syncing ? 'Sedang Menyinkronkan…' : 'Sinkronisasi Sekarang'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
       {orderError && <Notice message={orderError} type="error" />}
 
@@ -582,6 +712,115 @@ export default function CrewPOSScreen() {
       )}
 
     </ScrollView>
+
+      {/* Modal Detail Pesanan Needs Review */}
+      <Modal
+        visible={reviewModalVisible}
+        onClose={() => setReviewModalVisible(false)}
+        title="Rincian Pesanan Bermasalah"
+        subtitle="Pesanan ini membutuhkan peninjauan dan tidak dikirim ulang otomatis."
+        footer={
+          <BaseButton
+            label="Tutup"
+            onPress={() => setReviewModalVisible(false)}
+            fullWidth
+            size="md"
+          />
+        }
+      >
+        <ScrollView style={styles.modalScroll}>
+          {reviewItems.length > 1 && (
+            <View style={styles.reviewTabRow}>
+              {reviewItems.map((item, index) => {
+                const isSelected = selectedReviewOrder?.clientTransactionId === item.clientTransactionId;
+                return (
+                  <TouchableOpacity
+                    key={item.clientTransactionId}
+                    style={[styles.reviewTab, isSelected && styles.reviewTabActive]}
+                    onPress={() => setSelectedReviewOrder(item)}
+                  >
+                    <Text style={[styles.reviewTabText, isSelected && styles.reviewTabTextActive]}>
+                      Pesanan #{index + 1}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {selectedReviewOrder ? (
+            <View style={styles.reviewDetailCard}>
+              <View style={styles.reviewMetaRow}>
+                <Text style={styles.reviewMetaLabel}>ID Transaksi:</Text>
+                <Text style={styles.reviewMetaValue} numberOfLines={1}>
+                  {selectedReviewOrder.clientTransactionId}
+                </Text>
+              </View>
+
+              <View style={styles.reviewMetaRow}>
+                <Text style={styles.reviewMetaLabel}>Waktu Dibuat:</Text>
+                <Text style={styles.reviewMetaValue}>
+                  {selectedReviewOrder.createdAt ? new Date(selectedReviewOrder.createdAt).toLocaleString('id-ID') : '-'}
+                </Text>
+              </View>
+
+              <View style={styles.reviewMetaRow}>
+                <Text style={styles.reviewMetaLabel}>Metode Bayar:</Text>
+                <Text style={styles.reviewMetaValue}>
+                  {selectedReviewOrder.payload?.paymentMethod || 'CASH'}
+                </Text>
+              </View>
+
+              <View style={styles.reviewMetaRow}>
+                <Text style={styles.reviewMetaLabel}>Kode Kendala:</Text>
+                <Text style={styles.reviewErrorCode}>
+                  {selectedReviewOrder.errorCode || 'VALIDATION_FAILED'}
+                </Text>
+              </View>
+
+              <View style={styles.reviewReasonBox}>
+                <Text style={styles.reviewReasonTitle}>Alasan Peninjauan:</Text>
+                <Text style={styles.reviewReasonText}>
+                  {selectedReviewOrder.errorCode === 'CATALOG_ITEM_UNAVAILABLE'
+                    ? 'Salah satu menu/varian/add-on dalam pesanan ini tidak aktif atau tidak tersedia di outlet. Hubungi Manager untuk rekonsiliasi manual.'
+                    : selectedReviewOrder.errorCode === 'PRICE_CHANGED'
+                      ? 'Harga katalog master di server telah berubah sejak transaksi ini disimpan secara offline. Periksa selisih harga bersama Manager.'
+                      : selectedReviewOrder.errorCode === 'SESSION_ENDED_REVIEW'
+                        ? 'Sesi login sebelumnya telah berakhir saat transaksi masih dalam antrean offline. Pesanan siap disinkronkan kembali.'
+                        : 'Server menolak data pesanan ini karena validasi bisnis tidak terpenuhi. Mohon hubungi Manager.'}
+                </Text>
+              </View>
+
+              <Text style={styles.reviewSectionTitle}>Rincian Menu & Snapshot Harga:</Text>
+              {(selectedReviewOrder.payload?.items || []).map((item, idx) => (
+                <View key={idx} style={styles.reviewItemRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.reviewItemName}>
+                      {item.productVariantId} (x{item.quantity})
+                    </Text>
+                    {item.addOns && item.addOns.length > 0 && (
+                      <Text style={styles.reviewItemAddOn}>
+                        Add-ons: {item.addOns.map((a) => `${a.addOnId} (x${a.quantity})`).join(', ')}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.reviewItemPrice}>
+                    Rp {formatRupiah(item.expectedVariantPrice || 0)}
+                  </Text>
+                </View>
+              ))}
+
+              <View style={styles.reviewNoticeFoot}>
+                <Text style={styles.reviewNoticeFootText}>
+                  ℹ️ Sesuai standar keamanan Seroo, pesanan ini tidak dihapus dan tidak dikirim otomatis tanpa verifikasi.
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <Text style={styles.text}>Pilih pesanan untuk melihat detail.</Text>
+          )}
+        </ScrollView>
+      </Modal>
     </AppShell>
   );
 }
@@ -676,5 +915,136 @@ const styles = StyleSheet.create({
     ...typography.weights.semibold,
     fontSize: typography.sizes.sm,
     color: colors.light.textPrimary,
+  },
+  reviewBannerWrapper: {
+    gap: spacing.xs,
+  },
+  reviewDetailButton: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    alignSelf: 'flex-start',
+    backgroundColor: colors.light.surfaceMuted,
+    borderRadius: radii.sm,
+  },
+  reviewDetailButtonText: {
+    ...typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.maroon,
+  },
+  modalScroll: {
+    maxHeight: 400,
+  },
+  reviewTabRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  reviewTab: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surface,
+  },
+  reviewTabActive: {
+    backgroundColor: colors.light.maroon,
+    borderColor: colors.light.maroon,
+  },
+  reviewTabText: {
+    ...typography.fontFamily.medium,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+  },
+  reviewTabTextActive: {
+    color: colors.light.surface,
+  },
+  reviewDetailCard: {
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  reviewMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  reviewMetaLabel: {
+    ...typography.fontFamily.medium,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+  },
+  reviewMetaValue: {
+    ...typography.fontFamily.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textPrimary,
+    maxWidth: '65%',
+  },
+  reviewErrorCode: {
+    ...typography.fontFamily.bold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.error,
+  },
+  reviewReasonBox: {
+    backgroundColor: colors.light.surfaceMuted,
+    padding: spacing.sm,
+    borderRadius: radii.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.light.maroon,
+  },
+  reviewReasonTitle: {
+    ...typography.fontFamily.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.maroon,
+    marginBottom: 2,
+  },
+  reviewReasonText: {
+    ...typography.fontFamily.regular,
+    fontSize: 11,
+    color: colors.light.textPrimary,
+  },
+  reviewSectionTitle: {
+    ...typography.fontFamily.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    marginTop: spacing.xs,
+  },
+  reviewItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.light.border,
+  },
+  reviewItemName: {
+    ...typography.fontFamily.medium,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textPrimary,
+  },
+  reviewItemAddOn: {
+    ...typography.fontFamily.regular,
+    fontSize: 10,
+    color: colors.light.textSecondary,
+  },
+  reviewItemPrice: {
+    ...typography.fontFamily.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.maroon,
+  },
+  reviewNoticeFoot: {
+    marginTop: spacing.sm,
+    padding: spacing.xs,
+    backgroundColor: '#F8F9FA',
+    borderRadius: radii.sm,
+  },
+  reviewNoticeFootText: {
+    ...typography.fontFamily.regular,
+    fontSize: 10,
+    color: colors.light.textSecondary,
+    fontStyle: 'italic',
   },
 });

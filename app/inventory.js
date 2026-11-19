@@ -26,8 +26,14 @@ function uuidv4() {
 }
 
 export default function InventoryScreen() {
-  const { selection } = useAuth();
+  const { user, selection } = useAuth();
   const outletId = selection.activeOutletId;
+  const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
+  const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';
+  const navRole = isOwner ? 'ownerMitra' : 'manager';
+  const canMutateStock = activeRole === 'MANAGER';
+  const roleLabel = activeRole || 'MANAGER';
+
   const [stocks, setStocks] = useState([]);
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -126,11 +132,11 @@ export default function InventoryScreen() {
 
   return (
     <AppShell
-      navRole="manager"
+      navRole={navRole}
       active="stok"
       title="Inventaris outlet"
-      subtitle="Manager melihat jumlah, satuan, batas minimum, dan pergerakan stok."
-      roleLabel="MANAGER"
+      subtitle={isOwner ? "Memantau jumlah, satuan, batas minimum, dan pergerakan stok." : "Manager melihat jumlah, satuan, batas minimum, dan pergerakan stok."}
+      roleLabel={roleLabel}
       outletLabel={outletId || 'Outlet'}
       scopeLabel={outletId || 'Outlet'}
       contentStyle={styles.container}
@@ -148,27 +154,29 @@ export default function InventoryScreen() {
       >
         {error && !modalVisible && <Notice message={error} type="error" />}
 
-        <View style={styles.actionsCard}>
-          <View style={styles.scopeBadge}>
-            <Text style={styles.scopeBadgeText}>OUTLET INI</Text>
+        {canMutateStock && (
+          <View style={styles.actionsCard}>
+            <View style={styles.scopeBadge}>
+              <Text style={styles.scopeBadgeText}>OUTLET INI</Text>
+            </View>
+            <View style={styles.actions}>
+              <BaseButton
+                label="Stok masuk"
+                onPress={() => openModal('IN')}
+                fullWidth
+                size="lg"
+                variant="primary"
+              />
+              <BaseButton
+                label="Penyesuaian"
+                onPress={() => openModal('ADJUSTMENT')}
+                fullWidth
+                size="lg"
+                variant="secondary"
+              />
+            </View>
           </View>
-          <View style={styles.actions}>
-            <BaseButton
-              label="Stok masuk"
-              onPress={() => openModal('IN')}
-              fullWidth
-              size="lg"
-              variant="primary"
-            />
-            <BaseButton
-              label="Penyesuaian"
-              onPress={() => openModal('ADJUSTMENT')}
-              fullWidth
-              size="lg"
-              variant="secondary"
-            />
-          </View>
-        </View>
+        )}
 
         <Text style={styles.sectionTitle}>Daftar barang</Text>
         {loading ? (

@@ -407,6 +407,8 @@ export function createAuthClient({
     profile,
     request,
     restoreSession,
+    refreshAccessToken,
+    expireSession,
     getAccessToken: () => accessToken,
   };
 }

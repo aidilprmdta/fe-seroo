@@ -16,6 +16,7 @@ export const ROUTES = {
   notifications: "/notifications",
   inventory: "/inventory",
   waste: "/waste",
+  lossReports: "/loss-reports",
   stockRequests: "/stock-requests",
   expenses: "/expenses",
   reports: "/reports",
@@ -126,14 +127,28 @@ export function isAllowedRoute(pathname, memberships, context) {
       membership.role === context?.activeRole
     );
   }
-  if (pathname === ROUTES.inventory || pathname === ROUTES.waste) {
+  if (pathname === ROUTES.waste) {
     const membership = getSelectedMembership(
       memberships,
       context?.activeOutletId,
     );
     return (
-      membership?.role === "CREW" || membership?.role === "MANAGER"
-    ) && membership.role === context?.activeRole;
+      (membership?.role === "CREW" ||
+        membership?.role === "MANAGER" ||
+        membership?.role === "OWNER_MITRA" ||
+        membership?.role === "ADMIN_PUSAT") &&
+      membership.role === context?.activeRole
+    );
+  }
+  if (pathname === ROUTES.inventory || pathname === ROUTES.lossReports) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      (membership?.role === "CREW" || membership?.role === "MANAGER") &&
+      membership.role === context?.activeRole
+    );
   }
   if (pathname === ROUTES.stockRequests) {
     const membership = getSelectedMembership(

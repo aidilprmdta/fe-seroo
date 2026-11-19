@@ -78,6 +78,28 @@ export function createPosOutbox(repository, now = () => new Date()) {
       return repository.markNeedsReview({ ownerUserId });
     },
 
+    async requeueSessionOrders({ ownerUserId, outletId }) {
+      if (!ownerUserId || !outletId) return 0;
+      if (repository.requeueSessionOrders) {
+        return repository.requeueSessionOrders({ ownerUserId, outletId });
+      }
+      const records = await repository.list({ ownerUserId, outletId });
+      let restored = 0;
+      for (const rec of records) {
+        if (rec.status === "needs_review" && rec.errorCode === "SESSION_ENDED_REVIEW") {
+          await this.setStatus({
+            clientTransactionId: rec.clientTransactionId,
+            ownerUserId,
+            outletId,
+            status: "queued",
+            errorCode: null,
+          });
+          restored++;
+        }
+      }
+      return restored;
+    },
+
     async listPending({ ownerUserId, outletId, force = false }) {
       const records = await repository.list({ ownerUserId, outletId });
       return records
@@ -90,6 +112,7 @@ export function createPosOutbox(repository, now = () => new Date()) {
             !record.nextRetryAt ||
             Date.parse(record.nextRetryAt) <= now().getTime(),
         )
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
         .map(parseRecord);
     },
 

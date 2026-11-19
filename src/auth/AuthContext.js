@@ -9,7 +9,11 @@ import {
 } from "react";
 import * as SecureStore from "expo-secure-store";
 import { createAuthClient } from "./sessionClient";
-import { setAuthTokenProvider } from "../api/api";
+import {
+  setAuthTokenProvider,
+  setSessionDelegate,
+  clearSessionDelegate,
+} from "../api/api";
 import {
   getInitialOutletContext,
   getSelectedMembership,
@@ -53,19 +57,25 @@ export function AuthProvider({ children }) {
       secureStorage: SecureStore,
       allowInsecureHttp: typeof __DEV__ !== "undefined" && __DEV__,
       onSessionExpired: () => {
+        clearSessionDelegate();
         setState({
           ...ANONYMOUS_STATE,
           notice: "Sesi tidak berlaku. Silakan login kembali.",
         });
       },
     });
+    setSessionDelegate(clientRef.current);
   }
 
   const client = clientRef.current;
 
   useEffect(() => {
+    setSessionDelegate(client);
     setAuthTokenProvider(() => client.getAccessToken());
-    return () => setAuthTokenProvider(null);
+    return () => {
+      setSessionDelegate(null);
+      setAuthTokenProvider(null);
+    };
   }, [client]);
 
   useEffect(() => {
@@ -95,6 +105,8 @@ export function AuthProvider({ children }) {
   const login = useCallback(
     async (credentials) => {
       const profile = await client.login(credentials);
+      setSessionDelegate(client);
+      setAuthTokenProvider(() => client.getAccessToken());
       setState(stateForProfile(profile));
       return profile;
     },
@@ -110,6 +122,10 @@ export function AuthProvider({ children }) {
     setState((current) => ({ ...current, status: "loading", error: null }));
     try {
       const profile = await client.restoreSession();
+      if (profile) {
+        setSessionDelegate(client);
+        setAuthTokenProvider(() => client.getAccessToken());
+      }
       setState(profile ? stateForProfile(profile) : ANONYMOUS_STATE);
     } catch (error) {
       setState({
@@ -125,12 +141,14 @@ export function AuthProvider({ children }) {
     await markSessionOutboxesForReview(ownerUserId);
     try {
       const result = await client.logout();
+      clearSessionDelegate();
       setState({
         ...ANONYMOUS_STATE,
         notice: result.notice,
       });
       return result;
     } catch (error) {
+      clearSessionDelegate();
       setState({
         ...ANONYMOUS_STATE,
         notice: error.message,

@@ -84,7 +84,7 @@ export default function OwnerDashboardScreen() {
               <Text style={styles.metricLabel}>Omzet Kas</Text>
             </View>
             <Text style={styles.metricValue}>
-              Rp {formatRupiah(data.summary?.cashSales || 0)}
+              Rp {formatRupiah(data.sales?.cash?.total ?? data.summary?.cashSales ?? 0)}
             </Text>
           </Card>
           <Card style={metricCardStyle}>
@@ -93,7 +93,7 @@ export default function OwnerDashboardScreen() {
               <Text style={styles.metricLabel}>Omzet QRIS</Text>
             </View>
             <Text style={styles.metricValue}>
-              Rp {formatRupiah(data.summary?.qrisSales || 0)}
+              Rp {formatRupiah(data.sales?.qris?.total ?? data.summary?.qrisSales ?? 0)}
             </Text>
           </Card>
           <Card style={metricCardStyle}>
@@ -102,7 +102,7 @@ export default function OwnerDashboardScreen() {
               <Text style={styles.metricLabel}>Stok</Text>
             </View>
             <Text style={styles.metricValue}>
-              {data.summary?.stock || 0} item
+              {data.stock?.totalItems ?? data.summary?.stock ?? 0} item
             </Text>
           </Card>
           <Card style={metricCardStyle}>
@@ -111,7 +111,7 @@ export default function OwnerDashboardScreen() {
               <Text style={styles.metricLabel}>Pengeluaran</Text>
             </View>
             <Text style={styles.metricValue}>
-              Rp {formatRupiah(data.summary?.expenses || 0)}
+              Rp {formatRupiah(data.expenses?.totalExpense ?? data.summary?.expenses ?? 0)}
             </Text>
           </Card>
         </View>
@@ -121,28 +121,33 @@ export default function OwnerDashboardScreen() {
         <Card style={styles.listCard}>
           <ListItem
             title="Omzet Harian"
-            subtitle={`Rp ${formatRupiah(data.sales?.daily || 0)}`}
+            subtitle={`Rp ${formatRupiah(data.sales?.totalIncome ?? data.sales?.daily ?? 0)}`}
             leading={<View style={[styles.dot, { backgroundColor: colors.light.primary }]} />}
+            onPress={() => router.push(ROUTES.reports)}
           />
           <ListItem
-            title="Omzet Bulanan"
-            subtitle={`Rp ${formatRupiah(data.sales?.monthly || 0)}`}
-            leading={<View style={[styles.dot, { backgroundColor: colors.light.info }]} />}
-          />
-          <ListItem
-            title="Pengeluaran"
-            subtitle={`Rp ${formatRupiah(data.expenses || 0)}`}
+            title="Pengeluaran Hari Ini"
+            subtitle={`Rp ${formatRupiah(data.expenses?.totalExpense ?? (typeof data.expenses === 'number' ? data.expenses : 0))}`}
             leading={<View style={[styles.dot, { backgroundColor: colors.light.danger }]} />}
+            onPress={() => router.push(ROUTES.expenses)}
           />
           <ListItem
-            title="Stok Sisa"
-            subtitle={`${data.stock || 0} item aktif`}
+            title="Stok Bahan Aktif"
+            subtitle={`${data.stock?.totalItems ?? (typeof data.stock === 'number' ? data.stock : 0)} item (${data.stock?.lowStockCount || 0} menipis)`}
             leading={<View style={[styles.dot, { backgroundColor: colors.light.success }]} />}
+            onPress={() => router.push(ROUTES.inventory)}
           />
           <ListItem
-            title="Status Closing"
-            subtitle={data.closingStatus ? 'Selesai' : 'Belum dimulai'}
-            leading={<View style={[styles.dot, { backgroundColor: data.closingStatus ? colors.light.success : colors.light.warning }]} />}
+            title="Catatan Waste Hari Ini"
+            subtitle={`${data.waste?.todayCount ?? 0} pencatatan (${data.waste?.todayQuantity ?? 0} total qty)`}
+            leading={<View style={[styles.dot, { backgroundColor: colors.light.warning }]} />}
+            onPress={() => router.push(ROUTES.waste)}
+          />
+          <ListItem
+            title="Status Closing Harian"
+            subtitle={data.closingStatus?.daily?.status === 'CLOSED' || data.closingStatus === 'CLOSED' ? 'Selesai' : 'Belum selesai'}
+            leading={<View style={[styles.dot, { backgroundColor: data.closingStatus?.daily?.status === 'CLOSED' || data.closingStatus === 'CLOSED' ? colors.light.success : colors.light.warning }]} />}
+            onPress={() => router.push(ROUTES.closings)}
           />
         </Card>
 
@@ -151,7 +156,7 @@ export default function OwnerDashboardScreen() {
         <Card style={styles.listCard}>
           <ListItem
             title="Kelola Anggota Outlet"
-            subtitle="Tambah/edit/nonaktifkan staf"
+            subtitle="Tambah/edit/cabut akses staf"
             leading={<View style={[styles.dot, { backgroundColor: colors.light.primary }]} />}
             onPress={() => router.push(ROUTES.outletMembers)}
           />
@@ -160,6 +165,30 @@ export default function OwnerDashboardScreen() {
             subtitle="Ekspor CSV / cetak PDF"
             leading={<View style={[styles.dot, { backgroundColor: colors.light.info }]} />}
             onPress={() => router.push(ROUTES.reports)}
+          />
+          <ListItem
+            title="Riwayat Pengeluaran"
+            subtitle="Tinjau biaya operasional dan audit"
+            leading={<View style={[styles.dot, { backgroundColor: colors.light.danger }]} />}
+            onPress={() => router.push(ROUTES.expenses)}
+          />
+          <ListItem
+            title="Persediaan & Mutasi Stok"
+            subtitle="Pantau stok dan pergerakan barang"
+            leading={<View style={[styles.dot, { backgroundColor: colors.light.success }]} />}
+            onPress={() => router.push(ROUTES.inventory)}
+          />
+          <ListItem
+            title="Catatan Limbah / Waste"
+            subtitle="Pantau catatan bahan terbuang"
+            leading={<View style={[styles.dot, { backgroundColor: colors.light.warning }]} />}
+            onPress={() => router.push(ROUTES.waste)}
+          />
+          <ListItem
+            title="Closing & Rekonsiliasi Kas"
+            subtitle="Pantau closing dan selisih kas fisik"
+            leading={<View style={[styles.dot, { backgroundColor: colors.light.secondary }]} />}
+            onPress={() => router.push(ROUTES.closings)}
           />
         </Card>
       </View>

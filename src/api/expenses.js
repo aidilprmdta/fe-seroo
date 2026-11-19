@@ -1,4 +1,4 @@
-import { createApiClient } from './api';
+import { createApiClient } from './api.js';
 
 export function createExpensesApi({ request }) {
   return {

@@ -16,7 +16,7 @@ const ROLE_OPTIONS = ['CREW', 'MANAGER'];
 
 export default function OutletMembersScreen() {
   const { selection } = useAuth();
-  const outletId = selection.activeOutletId;
+  const outletId = selection?.activeOutletId;
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

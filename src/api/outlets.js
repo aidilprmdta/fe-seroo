@@ -1,4 +1,4 @@
-import { createApiClient } from './api';
+import { createApiClient } from './api.js';
 
 export function createOutletAccessApi({ request }) {
   return {
@@ -20,8 +20,11 @@ export function createOutletAccessApi({ request }) {
       const response = await request.post(`/outlets/${outletId}/members`, data);
       return response.data;
     },
-    async removeMember(outletId, memberId) {
-      const data = await request.delete(`/outlets/${outletId}/members/${memberId}`);
+    async removeMember(outletId, memberId, options = {}) {
+      const path = `/outlets/${encodeURIComponent(outletId)}/members/${encodeURIComponent(memberId)}`;
+      const data = await (typeof request.delete === 'function'
+        ? request.delete(path, options)
+        : request.del(path, options));
       return data;
     },
   };

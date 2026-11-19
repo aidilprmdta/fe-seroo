@@ -11,7 +11,7 @@ import ListItem from '../src/components/ListItem';
 import Input from '../src/components/Input';
 import BaseButton from '../src/components/BaseButton';
 import EmptyState from '../src/components/EmptyState';
-import ScreenFrame from '../src/components/ScreenFrame';
+import AppShell from '../src/components/AppShell';
 import Notice from '../src/components/Notice';
 
 function uuidv4() {
@@ -32,8 +32,13 @@ function toIsoDate(dateKey) {
 }
 
 export default function WasteScreen() {
-  const { selection } = useAuth();
+  const { user, selection } = useAuth();
   const outletId = selection.activeOutletId;
+  const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
+  const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';
+  const navRole = isOwner ? 'ownerMitra' : activeRole === 'CREW' ? 'crew' : 'manager';
+  const canCreateWaste = activeRole === 'CREW' || activeRole === 'MANAGER';
+  const roleLabel = activeRole || 'CREW';
 
   const [wasteRecords, setWasteRecords] = useState([]);
   const [itemName, setItemName] = useState('');
@@ -100,28 +105,33 @@ export default function WasteScreen() {
   }, [itemName, category, quantity, unit, description, date, outletId, getApi, loadWaste]);
 
   return (
-    <ScreenFrame>
+    <AppShell
+      navRole={navRole}
+      active="waste"
+      title="Catatan Waste"
+      subtitle={isOwner ? "Riwayat dan ringkasan limbah bahan/produk outlet." : "Pencatatan & riwayat waste outlet."}
+      roleLabel={roleLabel}
+      outletLabel={outletId || 'Outlet'}
+      scopeLabel={outletId || 'Outlet'}
+      contentStyle={styles.container}
+    >
       <ScrollView
-        contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadWaste} />}
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>Pencatatan Waste</Text>
-          <Text style={styles.subtitle}>Outlet: {outletId}</Text>
-        </View>
-
         {error && <Notice message={error} type="error" />}
 
-        <Card style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Catat Waste</Text>
-          <Input label="Nama item" value={itemName} onChangeText={setItemName} placeholder="Contoh: Teh tarik tumpah" />
-          <Input label="Kategori" value={category} onChangeText={setCategory} placeholder="Bahan Baku / Produk Batal" />
-          <Input label="Kuantitas" value={quantity} onChangeText={setQuantity} placeholder="0" keyboardType="numeric" />
-          <Input label="Unit" value={unit} onChangeText={setUnit} placeholder="pcs / cup / kg" />
-          <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
-          <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Alasan waste (opsional)" />
-          <BaseButton label="Simpan Waste" onPress={handleSubmit} loading={submitting} fullWidth size="lg" />
-        </Card>
+        {canCreateWaste && (
+          <Card style={styles.formCard}>
+            <Text style={styles.sectionTitle}>Catat Waste</Text>
+            <Input label="Nama item" value={itemName} onChangeText={setItemName} placeholder="Contoh: Teh tarik tumpah" />
+            <Input label="Kategori" value={category} onChangeText={setCategory} placeholder="Bahan Baku / Produk Batal" />
+            <Input label="Kuantitas" value={quantity} onChangeText={setQuantity} placeholder="0" keyboardType="numeric" />
+            <Input label="Unit" value={unit} onChangeText={setUnit} placeholder="pcs / cup / kg" />
+            <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
+            <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Alasan waste (opsional)" />
+            <BaseButton label="Simpan Waste" onPress={handleSubmit} loading={submitting} fullWidth size="lg" />
+          </Card>
+        )}
 
         <Text style={styles.sectionTitle}>Riwayat Waste</Text>
         {loading ? (
@@ -141,7 +151,7 @@ export default function WasteScreen() {
           ))
         )}
       </ScrollView>
-    </ScreenFrame>
+    </AppShell>
   );
 }
 
