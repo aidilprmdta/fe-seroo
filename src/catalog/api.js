@@ -30,7 +30,7 @@ export function createCatalogAdminApi({ request }) {
       const path = `/api/v1/admin/catalog/products`;
       const data = await request(path, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data || !data.product) {
         throw invalidResponse();
@@ -42,7 +42,7 @@ export function createCatalogAdminApi({ request }) {
       const path = `/api/v1/admin/catalog/variants/${encodeURIComponent(variantId)}`;
       const data = await request(path, {
         method: "PATCH",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data || !data.variant) {
         throw invalidResponse();
@@ -54,7 +54,7 @@ export function createCatalogAdminApi({ request }) {
       const path = `/api/v1/admin/catalog/add-ons`;
       const data = await request(path, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data || !data.addOn) {
         throw invalidResponse();

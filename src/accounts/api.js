@@ -41,7 +41,7 @@ export function createAdminAccountApi({ request }) {
     async createAccount(payload) {
       const data = await request("/api/v1/admin/accounts", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data || !data.account) {
         throw invalidResponse();
@@ -53,7 +53,7 @@ export function createAdminAccountApi({ request }) {
       const path = `/api/v1/admin/accounts/${encodeURIComponent(userId)}/status`;
       const data = await request(path, {
         method: "PATCH",
-        body: JSON.stringify({ isActive }),
+        body: { isActive },
       });
       if (!data || !data.account) {
         throw invalidResponse();

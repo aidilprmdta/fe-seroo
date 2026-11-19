@@ -30,7 +30,7 @@ export function createOutletAccessApi({ request }) {
       const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/members`;
       const data = await request(path, {
         method: "POST",
-        body: JSON.stringify({ email, userId, role }),
+        body: { email, userId, role },
       });
       if (!data || !data.membership) {
         throw invalidResponse();

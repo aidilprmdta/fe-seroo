@@ -108,7 +108,12 @@ export function createAuthClient({
       response = await fetchImpl(endpoint, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body:
+          body === undefined
+            ? undefined
+            : typeof body === "string"
+              ? body
+              : JSON.stringify(body),
         signal: controller.signal,
       });
     } catch (error) {

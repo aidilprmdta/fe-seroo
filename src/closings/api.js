@@ -47,7 +47,7 @@ export function createClosingApi({ request }) {
       const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/closings`;
       const data = await request(path, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data?.record || typeof data.record.status !== "string") {
         throw invalidResponse();
@@ -59,7 +59,7 @@ export function createClosingApi({ request }) {
       const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/cash-openings`;
       const data = await request(path, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data?.id || typeof data.openingCash !== "string") {
         throw invalidResponse();
@@ -80,7 +80,7 @@ export function createClosingApi({ request }) {
       const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/closings/reopen`;
       const data = await request(path, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       if (!data?.record || data.record.status !== "REOPENED") {
         throw invalidResponse();

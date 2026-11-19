@@ -49,7 +49,10 @@ test("Admin account API covers paginated reads, creation, and status changes", a
   };
   await api.createAccount(payload);
   assert.equal(requests[2].options.method, "POST");
-  assert.deepEqual(JSON.parse(requests[2].options.body), payload);
+  const createBody = typeof requests[2].options.body === "string"
+    ? JSON.parse(requests[2].options.body)
+    : requests[2].options.body;
+  assert.deepEqual(createBody, payload);
 
   const status = await api.setAccountActive("user/1", false);
   assert.equal(status.account.isActive, false);
@@ -57,7 +60,10 @@ test("Admin account API covers paginated reads, creation, and status changes", a
     requests[3].path,
     "/api/v1/admin/accounts/user%2F1/status",
   );
-  assert.deepEqual(JSON.parse(requests[3].options.body), { isActive: false });
+  const statusBody = typeof requests[3].options.body === "string"
+    ? JSON.parse(requests[3].options.body)
+    : requests[3].options.body;
+  assert.deepEqual(statusBody, { isActive: false });
 
   const reset = await api.resetPassword("user/1");
   assert.equal(reset.temporaryPassword, "random-password-from-server");
