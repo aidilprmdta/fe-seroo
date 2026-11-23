@@ -3,7 +3,7 @@
 function resolveBaseUrl() {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (!envUrl) {
-    return 'http://localhost:3000/api/v1';
+    return 'http://172.26.80.1:3000/api/v1';
   }
   // Hapus trailing slash jika ada
   const cleanUrl = envUrl.replace(/\/+$/, '');
