@@ -3,7 +3,16 @@
 function resolveBaseUrl() {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (!envUrl) {
-    return 'http://172.26.80.1:3000/api/v1';
+    if (
+      (typeof __DEV__ !== "undefined" && __DEV__) ||
+      process.env.NODE_ENV === "test" ||
+      !process.env.NODE_ENV
+    ) {
+      return "http://localhost:3000/api/v1";
+    }
+    throw new Error(
+      "EXPO_PUBLIC_API_URL belum dikonfigurasi. Pastikan variabel ini disertakan saat proses build."
+    );
   }
   // Hapus trailing slash jika ada
   const cleanUrl = envUrl.replace(/\/+$/, '');
