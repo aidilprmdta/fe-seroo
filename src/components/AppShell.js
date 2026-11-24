@@ -10,14 +10,18 @@ export const NAV = {
   crew: {
     phone: [
       { key: 'beranda', label: 'Beranda', icon: '⌂', route: '/crew' },
-      { key: 'menu', label: 'Menu', icon: '▦', route: '/crew/pos' },
-      { key: 'pesanan', label: 'Pesanan', icon: '≡', route: '/crew/orders' },
+      { key: 'menu', label: 'Kasir', icon: '▦', route: '/crew/pos' },
+      { key: 'shopee', label: 'Shopee', icon: '🛒', route: '/crew/shopee-food' },
+      { key: 'recept', label: 'Struk', icon: '🧾', route: '/crew/receipt-preview' },
+      { key: 'qris', label: 'Verif QRIS', icon: '✓', route: '/crew/qris-verify' },
+      { key: 'pesanan', label: 'Pesanan Saya', icon: '≡', route: '/crew/orders' },
       { key: 'stok', label: 'Stok', icon: '○', route: '/stock-requests' },
       { key: 'waste', label: 'Waste', icon: '!', route: '/waste' },
     ],
     tablet: [
       { key: 'beranda', label: 'Beranda', icon: '⌂', route: '/crew' },
       { key: 'menu', label: 'Kasir', icon: '▦', route: '/crew/pos' },
+      { key: 'shopee', label: 'ShopeeFood', icon: '🛒', route: '/crew/shopee-food' },
       { key: 'pesanan', label: 'Pesanan Saya', icon: '≡', route: '/crew/orders' },
       { key: 'stok', label: 'Status Stok', icon: '○', route: '/inventory' },
       { key: 'waste', label: 'Waste & Kehilangan', icon: '!', route: '/waste' },
@@ -44,6 +48,7 @@ export const NAV = {
       { key: 'laporan', label: 'Laporan', icon: '≡', route: '/reports' },
       { key: 'permintaan', label: 'Permintaan stok', icon: '↗', route: '/stock-requests' },
       { key: 'profil', label: 'Profil', icon: '◉', route: '/profile' },
+      { key: 'shift', label: 'Serah Terima', icon: '↩', route: '/manager/shift-handover' },
     ],
   },
   ownerMitra: {

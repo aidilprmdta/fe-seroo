@@ -46,7 +46,6 @@ export function useApi() {
 import { useContext, useEffect } from 'react';
 import { AuthContext } from '../auth/AuthContext';
 import { AuthApi } from '../api/api';
-import * as SecureStore from 'expo-secure-store';
 
 export function useAuth2() {
   const { user, session, status, login, logout, refreshToken, setSession } = useContext(AuthContext);

@@ -1,6 +1,7 @@
 // CrewOrdersScreen — riwayat order + verifikasi QRIS + pembatalan
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOrdersApi } from '../../src/api/orders';
 import { createApiClient } from '../../src/api/api';
@@ -12,7 +13,6 @@ import Badge from '../../src/components/Badge';
 import EmptyState from '../../src/components/EmptyState';
 import ScreenFrame from '../../src/components/ScreenFrame';
 import Notice from '../../src/components/Notice';
-import Modal from '../../src/components/Modal';
 import ConfirmDialog from '../../src/components/ConfirmDialog';
 
 function formatRupiah(value) {
@@ -36,15 +36,12 @@ function statusVariant(order) {
 
 export default function CrewOrdersScreen() {
   const { selection } = useAuth();
+  const router = useRouter();
   const outletId = selection.activeOutletId;
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [cancelTarget, setCancelTarget] = useState(null);
-  const [verifyTarget, setVerifyTarget] = useState(null);
-  const [cancelReason, setCancelReason] = useState('');
-  const [recordWaste, setRecordWaste] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const getApi = useCallback(() => {
@@ -69,53 +66,13 @@ export default function CrewOrdersScreen() {
     loadOrders();
   }, [loadOrders]);
 
-  const handleVerify = useCallback((order) => {
-    setVerifyTarget(order);
-    setError(null);
-  }, []);
-
-  const confirmVerify = useCallback(async () => {
-    if (!verifyTarget) return;
-    setSubmitting(true);
-    try {
-      await getApi().verifyQris(outletId, verifyTarget.id);
-      setVerifyTarget(null);
-      loadOrders();
-    } catch (err) {
-      setError(err?.message || 'Verifikasi QRIS gagal.');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [verifyTarget, getApi, outletId, loadOrders]);
+  const handleVerify = useCallback(() => {
+    router.push('/crew/qris-verify');
+  }, [router]);
 
   const openCancel = useCallback((order) => {
-    setCancelTarget(order);
-    setCancelReason('');
-    setRecordWaste(true);
-    setError(null);
-  }, []);
-
-  const handleCancel = useCallback(async () => {
-    setError(null);
-    if (cancelReason.trim().length < 5) {
-      setError('Alasan pembatalan minimal 5 karakter.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await getApi().cancelOrder(outletId, cancelTarget.id, {
-        reason: cancelReason.trim(),
-        recordWaste,
-      });
-      Alert.alert('Berhasil', 'Pesanan dibatalkan.');
-      setCancelTarget(null);
-      loadOrders();
-    } catch (err) {
-      setError(err?.message || 'Pembatalan gagal.');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [cancelReason, recordWaste, cancelTarget, getApi, outletId, loadOrders]);
+    router.push('/crew/cancel-request', { params: { id: order.id } });
+  }, [router]);
 
   return (
     <ScreenFrame>
@@ -163,54 +120,6 @@ export default function CrewOrdersScreen() {
           ))
         )}
       </ScrollView>
-
-      <Modal
-        visible={!!cancelTarget}
-        onClose={() => setCancelTarget(null)}
-        title="Batalkan Pesanan"
-        subtitle={`Order #${cancelTarget?.orderNumber || cancelTarget?.id || ''}`}
-        footer={
-          <BaseButton
-            label="Batalkan Pesanan"
-            onPress={handleCancel}
-            loading={submitting}
-            fullWidth
-            size="lg"
-            variant="danger"
-          />
-        }
-      >
-        <View style={styles.modalContent}>
-          {error && <Notice message={error} type="error" />}
-          <Input
-            label="Alasan pembatalan"
-            value={cancelReason}
-            onChangeText={setCancelReason}
-            placeholder="Minimal 5 karakter"
-          />
-          <TouchableOpacity
-            style={[styles.checkRow, recordWaste && styles.checkRowActive]}
-            onPress={() => setRecordWaste(!recordWaste)}
-          >
-            <Text style={[styles.checkText, recordWaste && styles.checkTextActive]}>
-              {recordWaste ? '✓' : '○'} Catat sebagai waste
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
-
-      <ConfirmDialog
-        visible={Boolean(verifyTarget)}
-        onClose={() => setVerifyTarget(null)}
-        onConfirm={confirmVerify}
-        badge="VERIFIKASI QRIS"
-        title="Verifikasi QRIS"
-        body={`Tandakan pembayaran order #${verifyTarget?.orderNumber || verifyTarget?.id || ''} sebagai lunas? Pembayaran akan masuk ke rekap outlet.`}
-        cancelLabel="Batal"
-        confirmLabel="Verifikasi"
-        confirmVariant="primary"
-        loading={submitting}
-      />
     </ScreenFrame>
   );
 }

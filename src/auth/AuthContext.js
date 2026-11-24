@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import * as SecureStore from "expo-secure-store";
+import { tokenStorage } from "./tokenStorage";
 import { createAuthClient } from "./sessionClient";
 import {
   setAuthTokenProvider,
@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
   if (!clientRef.current) {
     clientRef.current = createAuthClient({
       apiBaseUrl: process.env.EXPO_PUBLIC_API_URL,
-      secureStorage: SecureStore,
+      secureStorage: tokenStorage,
       allowInsecureHttp: typeof __DEV__ !== "undefined" && __DEV__,
       onSessionExpired: () => {
         clearSessionDelegate();

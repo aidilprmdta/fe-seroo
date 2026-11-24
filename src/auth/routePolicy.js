@@ -6,7 +6,13 @@ export const ROUTES = {
   crew: "/crew",
   crewPos: "/crew/pos",
   crewOrders: "/crew/orders",
+  crewShopeeFood: "/crew/shopee-food",
+  crewReceiptPreview: "/crew/receipt-preview",
+  crewQrisVerify: "/crew/qris-verify",
+  crewTransactionDetail: "/crew/transaction-detail",
+  crewCancelRequest: "/crew/cancel-request",
   manager: "/manager/dashboard",
+  managerShiftHandover: "/manager/shift-handover",
   owner: "/owner/dashboard",
   adminCatalog: "/admin/catalog",
   adminAccounts: "/admin/accounts",
@@ -116,6 +122,17 @@ export function isAllowedRoute(pathname, memberships, context) {
   }
   if (pathname === ROUTES.crewPos) {
     return landingRoute === ROUTES.crew;
+  }
+  if (pathname === ROUTES.crewShopeeFood) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      (membership?.role === "CREW" ||
+        membership?.role === "MANAGER") &&
+      membership.role === context?.activeRole
+    );
   }
   if (pathname === ROUTES.crewOrders) {
     const membership = getSelectedMembership(
