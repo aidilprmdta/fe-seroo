@@ -4,7 +4,7 @@ import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, 
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOrdersApi } from '../../src/api/orders';
-import { createApiClient } from '../../src/api/api';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
@@ -35,7 +35,7 @@ function statusVariant(order) {
 }
 
 export default function CrewOrdersScreen() {
-  const { selection } = useAuth();
+  const { selection, apiRequest } = useAuth();
   const router = useRouter();
   const outletId = selection.activeOutletId;
   const [orders, setOrders] = useState([]);
@@ -45,9 +45,8 @@ export default function CrewOrdersScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const getApi = useCallback(() => {
-    const client = createApiClient();
-    return createOrdersApi({ request: client });
-  }, []);
+    return createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
+  }, [apiRequest]);
 
   const loadOrders = useCallback(async () => {
     try {

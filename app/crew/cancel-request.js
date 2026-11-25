@@ -4,7 +4,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOrdersApi } from '../../src/api/orders';
-import { createApiClient } from '../../src/api/api';
+import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
@@ -22,7 +22,7 @@ function formatRupiah(value) {
 
 export default function CrewCancelRequestScreen({ route }) {
   const { id: orderId } = route.params || {};
-  const { selection } = useAuth();
+  const { selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
 
   const [order, setOrder] = useState(null);
@@ -32,8 +32,7 @@ export default function CrewCancelRequestScreen({ route }) {
   const [error, setError] = useState(null);
 
   const getApi = useCallback(() => {
-    const client = createApiClient();
-    return createOrdersApi({ request: client });
+    return createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
   }, []);
 
   const loadOrder = useCallback(async () => {

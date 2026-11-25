@@ -11,7 +11,7 @@ import BaseButton from '../src/components/BaseButton';
 import ScreenFrame from '../src/components/ScreenFrame';
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, selection } = useAuth();
   const router = useRouter();
 
   const handleChangePassword = useCallback(() => {
@@ -32,7 +32,7 @@ export default function ProfileScreen() {
         </Card>
 
         <Text style={styles.name}>{user?.name}</Text>
-        <Text style={styles.role}>{user?.role}</Text>
+        <Text style={styles.role}>{selection?.activeRole || '—'}</Text>
         <Text style={styles.email}>{user?.email}</Text>
 
         <Text style={styles.sectionTitle}>Akun</Text>

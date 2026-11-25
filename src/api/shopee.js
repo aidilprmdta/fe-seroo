@@ -1,18 +1,11 @@
-// ShopeeFood API client — Flow pemesanan dari platform eksternal (ShopeeFood/Grab)
-// Frontend: app/crew/shopee-food.js
-// Backend: perlu endpoint POST /outlets/:outletId/shopee/orders (belum ada — buat di BE)
+// ShopeeFood API client — order dibuat lewat endpoint POS biasa dengan
+// platformOrderId (lihat backend/src/pos/routes.js). Modul ini untuk
+// daftar & update status penyerahan driver (backend/src/shopee-food/routes.js).
 
 import { createApiClient } from './api.js';
 
 export function createShopeeApi({ request }) {
   return {
-    // Simpan pesanan ShopeeFood dari platform eksternal
-    // Payload sesuai orderSchema di backend (clientTransactionId, recordedOffline, paymentMethod, payments, items)
-    async createOrder(outletId, orderData) {
-      const data = await request.post(`/outlets/${outletId}/orders`, orderData);
-      return data;
-    },
-
     // Lihat daftar pesanan ShopeeFood yang belum selesai (pending)
     async listPendingOrders(outletId, params = {}) {
       const query = new URLSearchParams(params).toString();
@@ -23,25 +16,13 @@ export function createShopeeApi({ request }) {
       return data;
     },
 
-    // Update status pesanan Shopee Food (pickup → deliver → settlement)
+    // Update status penyerahan driver (PENDING/PICKED/DELIVERED/SETTLED/CANCELLED)
     async updateOrderStatus(outletId, orderId, statusData) {
       const data = await request.patch(
-        `/outlets/${outletId}/orders/${orderId}/shopee-status`,
+        `/outlets/${outletId}/orders/${orderId}/status`,
         statusData,
       );
       return data;
     },
-
-    // Ambil detail pesanan ShopeeFood
-    async getOrder(outletId, orderId) {
-      const data = await request.get(`/outlets/${outletId}/orders/${orderId}`);
-      return data;
-    },
   };
-}
-
-// Factory default: buat client + API grab-gabungan
-export async function createShopeeClient() {
-  const client = createApiClient();
-  return createShopeeApi({ request: client });
 }

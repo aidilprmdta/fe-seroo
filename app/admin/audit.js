@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from 'react-native';
 import { createAdminApi } from '../../src/api/admin';
-import { createApiClient } from '../../src/api/api';
+import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
 import { useAuth } from '../../src/auth/AuthContext';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import ScreenFrame from '../../src/components/ScreenFrame';
@@ -17,7 +17,7 @@ const FILTERS = [
 ];
 
 export default function AdminAuditScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const [logs, setLogs] = useState([]);
   const [filter, setFilter] = useState('today');
   const [loading, setLoading] = useState(true);
@@ -35,8 +35,7 @@ export default function AdminAuditScreen() {
 
   const loadLogs = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const api = createAdminApi({ request: client });
+      const api = createAdminApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await api.listAuditLogs({ page: 1, pageSize: 100 });
       setLogs(data?.data?.auditLogs || []);
       setError(null);

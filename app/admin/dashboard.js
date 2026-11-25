@@ -56,7 +56,7 @@ export default function AdminDashboardScreen() {
       </View>
 
       <View style={styles.privilegeBadge}>
-        <Text style={styles.privilegeText}>MASTER &amp; AKUN</Text>
+        <Text style={styles.privilegeText}>MASTER & AKUN</Text>
       </View>
 
       <TouchableOpacity onPress={() => router.push(ROUTES.adminAudit)}>

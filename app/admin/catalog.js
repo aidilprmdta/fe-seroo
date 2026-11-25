@@ -19,7 +19,6 @@ import PrimaryButton from "../../src/components/PrimaryButton";
 import ProfileButton from "../../src/components/ProfileButton";
 import ScreenFrame from "../../src/components/ScreenFrame";
 import { createCatalogAdminApi } from "../../src/catalog/api";
-import { createRecipeApi } from "../../src/recipes/api";
 import { colors, spacing } from "../../src/theme/tokens";
 
 function formatRupiah(value) {
@@ -35,11 +34,6 @@ export default function AdminCatalogScreen() {
 
   const api = useMemo(
     () => createCatalogAdminApi({ request: apiRequest }),
-    [apiRequest],
-  );
-
-  const recipeApi = useMemo(
-    () => createRecipeApi({ request: apiRequest }),
     [apiRequest],
   );
 
@@ -62,16 +56,6 @@ export default function AdminCatalogScreen() {
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [editPriceInput, setEditPriceInput] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
-
-  // Modal states for managing recipe
-  const [showRecipeModal, setShowRecipeModal] = useState(false);
-  const [recipeVariant, setRecipeVariant] = useState(null);
-  const [recipeItems, setRecipeItems] = useState([]);
-  const [availableIngredients, setAvailableIngredients] = useState([]);
-  const [selectedIngredientId, setSelectedIngredientId] = useState("");
-  const [ingredientQty, setIngredientQty] = useState("");
-  const [loadingRecipe, setLoadingRecipe] = useState(false);
-  const [savingRecipe, setSavingRecipe] = useState(false);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -135,87 +119,6 @@ export default function AdminCatalogScreen() {
       setError(err.message || "Gagal memperbarui harga.");
     } finally {
       setSavingPrice(false);
-    }
-  };
-
-  const openRecipeModal = async (variant, product) => {
-    setRecipeVariant({ ...variant, productName: product.name });
-    setShowRecipeModal(true);
-    setLoadingRecipe(true);
-    setError(null);
-    try {
-      const [recData, ingList] = await Promise.all([
-        recipeApi.getVariantRecipe(variant.id),
-        recipeApi.listIngredients().catch(() => []),
-      ]);
-      setRecipeItems(
-        (recData.items || []).map((it) => ({
-          inventoryItemId: it.inventoryItemId,
-          name: it.ingredientName,
-          unit: it.unit,
-          quantity: it.quantity,
-        })),
-      );
-      setAvailableIngredients(ingList);
-      if (ingList.length > 0) {
-        setSelectedIngredientId(ingList[0].id);
-      }
-    } catch (err) {
-      setError(err.message || "Gagal memuat resep.");
-    } finally {
-      setLoadingRecipe(false);
-    }
-  };
-
-  const handleAddRecipeItem = () => {
-    if (!selectedIngredientId || !ingredientQty || Number(ingredientQty) <= 0) {
-      setError("Pilih bahan baku dan masukkan takaran kuantitas yang valid.");
-      return;
-    }
-    const ing = availableIngredients.find((i) => i.id === selectedIngredientId);
-    if (!ing) return;
-    if (recipeItems.some((it) => it.inventoryItemId === ing.id)) {
-      setError("Bahan baku tersebut sudah ada di resep ini.");
-      return;
-    }
-    setRecipeItems((prev) => [
-      ...prev,
-      {
-        inventoryItemId: ing.id,
-        name: ing.name,
-        unit: ing.unit,
-        quantity: ingredientQty.trim(),
-      },
-    ]);
-    setIngredientQty("");
-    setError(null);
-  };
-
-  const handleRemoveRecipeItem = (index) => {
-    setRecipeItems((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
-  const handleSaveRecipe = async () => {
-    if (!recipeVariant) return;
-    setSavingRecipe(true);
-    setError(null);
-    try {
-      await recipeApi.setVariantRecipe(
-        recipeVariant.id,
-        recipeItems.map((it) => ({
-          inventoryItemId: it.inventoryItemId,
-          quantity: it.quantity,
-        })),
-      );
-      setShowRecipeModal(false);
-      setRecipeVariant(null);
-      setSuccessMsg(
-        `Resep ${recipeVariant.productName} (${recipeVariant.name}) berhasil disimpan. Pemotongan stok otomatis aktif di seluruh outlet.`,
-      );
-    } catch (err) {
-      setError(err.message || "Gagal menyimpan resep.");
-    } finally {
-      setSavingRecipe(false);
     }
   };
 
@@ -307,18 +210,7 @@ export default function AdminCatalogScreen() {
                               </Text>
                             </View>
                             <View style={styles.variantActionRow}>
-                              <Pressable
-                                style={styles.recipeBtn}
-                                onPress={() => {
-                                  setSuccessMsg(null);
-                                  setError(
-                                    "Master bahan baku & resep belum tersedia di backend. Fitur ini disembunyikan sementara agar tidak menghasilkan error.",
-                                  );
-                                }}
-                              >
-                                <Text style={styles.recipeBtnText}>🧪 Kelola Resep</Text>
-                              </Pressable>
-
+                              <View style={{ width: 80 }} />
                               <Pressable
                                 style={styles.editPriceBtn}
                                 onPress={() => {
@@ -463,134 +355,6 @@ export default function AdminCatalogScreen() {
                   label={savingPrice ? "Menyimpan..." : "Terapkan Harga"}
                   disabled={savingPrice}
                   onPress={handleUpdatePrice}
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Modal Kelola Resep */}
-        <Modal
-          visible={showRecipeModal}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowRecipeModal(false)}
-        >
-          <View style={styles.modalBackdrop}>
-            <View style={[styles.modalBox, { maxWidth: 540 }]}>
-              <Text style={styles.modalTitle}>
-                Kelola Resep: {recipeVariant?.productName} ({recipeVariant?.name})
-              </Text>
-              <Text style={styles.modalSubtitle}>
-                Tentukan takaran bahan baku per porsi minuman. Transaksi POS kasir akan otomatis memotong stok sesuai resep ini.
-              </Text>
-
-              {loadingRecipe ? (
-                <View style={{ padding: 24, alignItems: "center" }}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={{ marginTop: 8, color: colors.textSecondary, fontSize: 13 }}>
-                    Memuat resep bahan baku...
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  <Text style={[styles.fieldLabel, { marginTop: 8 }]}>
-                    Daftar Bahan Resep ({recipeItems.length}):
-                  </Text>
-                  {recipeItems.length === 0 ? (
-                    <Text style={{ fontSize: 13, color: colors.muted, fontStyle: "italic", marginBottom: 8 }}>
-                      Belum ada bahan baku pada resep ini. Tambahkan bahan di bawah.
-                    </Text>
-                  ) : (
-                    <View style={styles.recipeItemList}>
-                      {recipeItems.map((item, idx) => (
-                        <View key={item.inventoryItemId || idx} style={styles.recipeItemRow}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.recipeItemName}>{item.name}</Text>
-                            <Text style={styles.recipeItemQty}>
-                              {item.quantity} {item.unit}
-                            </Text>
-                          </View>
-                          <Pressable
-                            onPress={() => handleRemoveRecipeItem(idx)}
-                            style={styles.removeRecipeBtn}
-                          >
-                            <Text style={styles.removeRecipeBtnText}>Hapus</Text>
-                          </Pressable>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Form Tambah Bahan ke Resep */}
-                  <View style={styles.addRecipeBox}>
-                    <Text style={styles.addRecipeBoxTitle}>+ Tambah Bahan ke Resep</Text>
-                    {availableIngredients.length === 0 ? (
-                      <Text style={{ fontSize: 12, color: colors.muted }}>
-                        Tidak ada bahan baku master yang tersedia.
-                      </Text>
-                    ) : (
-                      <>
-                        <Text style={styles.fieldLabel}>Pilih Bahan Baku:</Text>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          style={{ marginBottom: 8 }}
-                        >
-                          {availableIngredients.map((ing) => (
-                            <Pressable
-                              key={ing.id}
-                              onPress={() => setSelectedIngredientId(ing.id)}
-                              style={[
-                                styles.ingredientPill,
-                                selectedIngredientId === ing.id && styles.ingredientPillActive,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.ingredientPillText,
-                                  selectedIngredientId === ing.id && styles.ingredientPillTextActive,
-                                ]}
-                              >
-                                {ing.name} ({ing.unit})
-                              </Text>
-                            </Pressable>
-                          ))}
-                        </ScrollView>
-
-                        <Text style={styles.fieldLabel}>Takaran Kuantitas Pemakaian:</Text>
-                        <View style={{ flexDirection: "row", gap: 8 }}>
-                          <TextInput
-                            style={[styles.input, { flex: 1 }]}
-                            placeholder="Contoh: 15.000 atau 30"
-                            keyboardType="numeric"
-                            value={ingredientQty}
-                            onChangeText={setIngredientQty}
-                          />
-                          <Pressable
-                            onPress={handleAddRecipeItem}
-                            style={styles.addIngredientBtn}
-                          >
-                            <Text style={styles.addIngredientBtnText}>+ Tambah</Text>
-                          </Pressable>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                </>
-              )}
-
-              <View style={styles.modalActionRow}>
-                <PrimaryButton
-                  label="Tutup"
-                  secondary
-                  disabled={savingRecipe}
-                  onPress={() => setShowRecipeModal(false)}
-                />
-                <PrimaryButton
-                  label={savingRecipe ? "Menyimpan..." : "Simpan Resep"}
-                  disabled={savingRecipe || loadingRecipe}
-                  onPress={handleSaveRecipe}
                 />
               </View>
             </View>

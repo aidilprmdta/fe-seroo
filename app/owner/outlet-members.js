@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOutletAccessApi } from '../../src/api/outlets';
-import { createApiClient } from '../../src/api/api';
+import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
 import Input from '../../src/components/Input';
 import BaseButton from '../../src/components/BaseButton';
 import Notice from '../../src/components/Notice';
@@ -15,7 +15,7 @@ import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 const ROLE_OPTIONS = ['CREW', 'MANAGER'];
 
 export default function OutletMembersScreen() {
-  const { selection } = useAuth();
+  const { selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -27,8 +27,7 @@ export default function OutletMembersScreen() {
 
   const loadMembers = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const api = createOutletAccessApi({ request: client });
+      const api = createOutletAccessApi({ request: createApiRequestWrapper(apiRequest) });
       const response = await api.getMembers(outletId);
       setMembers(response?.data?.members || []);
     } catch (err) {
@@ -51,8 +50,7 @@ export default function OutletMembersScreen() {
     }
     setSubmitting(true);
     try {
-      const client = createApiClient();
-      const api = createOutletAccessApi({ request: client });
+      const api = createOutletAccessApi({ request: createApiRequestWrapper(apiRequest) });
       await api.assignMember(outletId, { email: email.trim().toLowerCase(), role });
       setEmail('');
       Alert.alert('Berhasil', 'Anggota outlet berhasil ditambahkan.');
@@ -75,8 +73,7 @@ export default function OutletMembersScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const client = createApiClient();
-              const api = createOutletAccessApi({ request: client });
+              const api = createOutletAccessApi({ request: createApiRequestWrapper(apiRequest) });
               await api.removeMember(outletId, member.userId);
               loadMembers();
             } catch (err) {

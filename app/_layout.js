@@ -116,6 +116,7 @@ function GuardedStack() {
             redirectTo={landingRoute}
           >
             <Stack.Screen name="manager/dashboard" />
+            <Stack.Screen name="manager/availability" />
           </Stack.Protected>
 
           <Stack.Protected

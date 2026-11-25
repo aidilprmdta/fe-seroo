@@ -1,9 +1,11 @@
 // CrewScreen — Figma 01 · Crew Beranda (HP & Tablet)
-import React from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
 import { ROUTES } from '../src/auth/routePolicy';
+import { createOrdersApi } from '../src/api/orders';
+import { createApiRequestWrapper } from '../src/api/api';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
 import AppShell from '../src/components/AppShell';
 
@@ -15,10 +17,40 @@ const QUICK = [
 ];
 
 export default function CrewScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const router = useRouter();
   const outlet = user?.memberships?.find((m) => m.outletId === selection.activeOutletId);
   const outletName = outlet?.outletName || 'Outlet';
+
+  const ordersApi = useCallback(() => createOrdersApi({ request: createApiRequestWrapper(apiRequest) }), [apiRequest]);
+
+  const [stats, setStats] = useState({ transactionCount: 0, totalSales: '0' });
+  const [loadingStats, setLoadingStats] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStats() {
+      try {
+        const data = await ordersApi().listOrders(outlet?.outletId || selection.activeOutletId, {
+          crewId: user?.id,
+          startDate: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+          endDate: new Date(new Date().setHours(23, 59, 59, 999)).toISOString(),
+        });
+        if (cancelled) return;
+        const orders = data?.data?.orders || [];
+        setStats({
+          transactionCount: orders.length,
+          totalSales: orders.reduce((sum, o) => sum + Number(o.total || 0), 0).toLocaleString('id-ID'),
+        });
+      } catch {
+        // statistik opsional
+      } finally {
+        if (!cancelled) setLoadingStats(false);
+      }
+    }
+    loadStats();
+    return () => { cancelled = true; };
+  }, [ordersApi, outlet?.outletId, user?.id, selection.activeOutletId]);
 
   return (
     <AppShell
@@ -44,12 +76,12 @@ export default function CrewScreen() {
       <View style={styles.metrics}>
         <View style={styles.metricCard}>
           <Text style={styles.metricLabel}>Transaksi saya</Text>
-          <Text style={styles.metricValue}>—</Text>
+          <Text style={styles.metricValue}>{loadingStats ? '—' : stats.transactionCount}</Text>
           <Text style={styles.metricHint}>Hari ini</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricLabel}>Penjualan saya</Text>
-          <Text style={styles.metricValue}>Rp —</Text>
+          <Text style={styles.metricValue}>{loadingStats ? 'Rp —' : `Rp ${stats.totalSales}`}</Text>
           <Text style={styles.metricHint}>Transaksi akun ini</Text>
         </View>
       </View>

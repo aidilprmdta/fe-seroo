@@ -6,7 +6,7 @@ import * as Network from 'expo-network';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createCatalogApi } from '../../src/api/catalog';
 import { createOrdersApi } from '../../src/api/orders';
-import { createApiClient } from '../../src/api/api';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Input from '../../src/components/Input';
 import BaseButton from '../../src/components/BaseButton';
@@ -44,7 +44,7 @@ function cartKey(variantId, addOns) {
 }
 
 export default function CrewPOSScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const ownerUserId = user?.id;
   const outletId = selection?.activeOutletId;
   const [view, setView] = useState('catalog');
@@ -75,8 +75,7 @@ export default function CrewPOSScreen() {
 
   const loadCatalog = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const catalogApi = createCatalogApi({ request: client });
+      const catalogApi = createCatalogApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await catalogApi.getCatalog(outletId);
       setCatalog(data);
     } catch (err) {
@@ -101,10 +100,9 @@ export default function CrewPOSScreen() {
   }, []);
 
   const getSyncService = useCallback(() => {
-    const client = createApiClient();
-    const ordersApi = createOrdersApi({ request: client });
+    const ordersApi = createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
     return createPosSyncService({ outbox: posOutbox, ordersApi });
-  }, []);
+  }, [apiRequest]);
 
   const refreshQueueSummary = useCallback(async () => {
     if (!ownerUserId || !outletId) return;
@@ -343,8 +341,7 @@ export default function CrewPOSScreen() {
 
     setSubmitting(true);
     try {
-      const client = createApiClient();
-      const ordersApi = createOrdersApi({ request: client });
+      const ordersApi = createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
       const response = await ordersApi.createOrder(outletId, payload);
       const order = response?.data?.order;
       if (!response?.success || !order) {

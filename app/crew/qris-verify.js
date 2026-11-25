@@ -4,7 +4,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOrdersApi } from '../../src/api/orders';
-import { createApiClient } from '../../src/api/api';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
@@ -21,7 +21,7 @@ function formatRupiah(value) {
 }
 
 export default function CrewQrisVerifyScreen() {
-  const { selection } = useAuth();
+  const { selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
 
   const [orders, setOrders] = useState([]);
@@ -32,9 +32,8 @@ export default function CrewQrisVerifyScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const getApi = useCallback(() => {
-    const client = createApiClient();
-    return createOrdersApi({ request: client });
-  }, []);
+    return createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
+  }, [apiRequest]);
 
   const loadOrders = useCallback(async () => {
     try {

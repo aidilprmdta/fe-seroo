@@ -12,6 +12,7 @@ export const ROUTES = {
   crewTransactionDetail: "/crew/transaction-detail",
   crewCancelRequest: "/crew/cancel-request",
   manager: "/manager/dashboard",
+  managerAvailability: "/manager/availability",
   managerShiftHandover: "/manager/shift-handover",
   owner: "/owner/dashboard",
   adminCatalog: "/admin/catalog",
@@ -207,5 +208,20 @@ export function isAllowedRoute(pathname, memberships, context) {
       membership.role === context?.activeRole
     );
   }
+
+  if (pathname === ROUTES.managerAvailability) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      (membership?.role === "MANAGER" ||
+        membership?.role === "OWNER" ||
+        membership?.role === "OWNER_MITRA" ||
+        membership?.role === "ADMIN_PUSAT") &&
+      membership.role === context?.activeRole
+    );
+  }
+
   return pathname === landingRoute;
 }

@@ -272,6 +272,32 @@ export function createApiClient({ baseUrl = BASE_URL } = {}) {
   return client;
 }
 
+// Convert a request function (with built-in auto-refresh token) into
+// the object shape expected by the API modules (createOrdersApi,
+// createInventoryApi, createReportsApi, LossReportsApi, etc.).
+export function createApiRequestWrapper(apiRequest) {
+  return {
+    async get(path, options = {}) {
+      return apiRequest(path, { ...options, method: 'GET' });
+    },
+    async post(path, body = null, options = {}) {
+      return apiRequest(
+        path,
+        { ...options, method: 'POST', body: body !== null ? JSON.stringify(body) : null },
+      );
+    },
+    async patch(path, body = null, options = {}) {
+      return apiRequest(
+        path,
+        { ...options, method: 'PATCH', body: body !== null ? JSON.stringify(body) : null },
+      );
+    },
+    async del(path, options = {}) {
+      return apiRequest(path, { ...options, method: 'DELETE' });
+    },
+  };
+}
+
 // Auth API
 export class AuthApi {
   constructor(request) {

@@ -4,7 +4,7 @@ import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, 
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../src/auth/AuthContext';
 import { createReportsApi } from '../src/api/reports';
-import { createApiClient } from '../src/api/api';
+import { createApiRequestWrapper } from '../src/api/api';
 import { createReportPdf, createReportXlsx, bytesToBase64 } from '../src/lib/reportFiles';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
 import { useResponsive } from '../src/theme/responsive';
@@ -24,7 +24,7 @@ function formatRupiah(value) {
 
 export default function ReportsScreen() {
   const r = useResponsive();
-  const { selection, user } = useAuth();
+  const { selection, user, apiRequest } = useAuth();
   const activeRole = user?.memberships?.find((m) => m.outletId === selection.activeOutletId)?.role;
   const navRole = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER' ? 'ownerMitra' : 'manager';
   const outletId = selection.activeOutletId;
@@ -47,8 +47,7 @@ export default function ReportsScreen() {
 
   const loadReport = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const reportsApi = createReportsApi({ request: client });
+      const reportsApi = createReportsApi({ request: createApiRequestWrapper(apiRequest) });
       const data = mode === 'MONTHLY'
         ? await reportsApi.getMonthlyReport(outletId, monthKey)
         : await reportsApi.getDailyReport(outletId, date);

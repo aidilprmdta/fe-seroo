@@ -4,7 +4,7 @@ import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, 
 import * as Crypto from 'expo-crypto';
 import { useAuth } from '../src/auth/AuthContext';
 import { createInventoryApi } from '../src/api/inventory';
-import { createApiClient } from '../src/api/api';
+import { createApiRequestWrapper } from '../src/api/api';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
 import Card from '../src/components/Card';
 import ListItem from '../src/components/ListItem';
@@ -26,7 +26,7 @@ function uuidv4() {
 }
 
 export default function InventoryScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection.activeOutletId;
   const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
   const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';
@@ -49,8 +49,7 @@ export default function InventoryScreen() {
 
   const loadStock = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const inventoryApi = createInventoryApi({ request: client });
+      const inventoryApi = createInventoryApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await inventoryApi.getStock(outletId, { page: 1, pageSize: 50 });
       setStocks(data?.data?.stocks || []);
     } catch (err) {
@@ -63,8 +62,7 @@ export default function InventoryScreen() {
 
   const loadMovements = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const api = createInventoryApi({ request: client });
+      const api = createInventoryApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await api.getStockMovements(outletId, { pageSize: 50 });
       setMovements(data?.data?.movements || []);
     } catch {
@@ -112,8 +110,7 @@ export default function InventoryScreen() {
 
     setSubmitting(true);
     try {
-      const client = createApiClient();
-      const api = createInventoryApi({ request: client });
+      const api = createInventoryApi({ request: createApiRequestWrapper(apiRequest) });
       if (mode === 'ADJUSTMENT') {
         await api.createStockAdjustment(outletId, payload);
       } else {

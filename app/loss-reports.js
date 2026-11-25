@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
-import { createApiClient } from '../src/api/api';
+import { createApiClient, createApiRequestWrapper } from '../src/api/api';
 import { createLossReportsApi } from '../src/api/loss-reports';
 import { createInventoryApi } from '../src/api/inventory';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
@@ -26,7 +26,7 @@ import ScreenFrame from '../src/components/ScreenFrame';
 
 export default function LossReportsScreen() {
   const router = useRouter();
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection.activeOutletId;
   const role = selection.activeRole;
   const isManager = role === 'MANAGER' || role === 'OWNER' || role === 'OWNER_MITRA';
@@ -59,13 +59,11 @@ export default function LossReportsScreen() {
   const [globalError, setGlobalError] = useState(null);
 
   const getApi = useCallback(() => {
-    const client = createApiClient();
-    return createLossReportsApi({ request: client });
+    return createLossReportsApi({ request: createApiRequestWrapper(apiRequest) });
   }, []);
 
   const getInventoryApi = useCallback(() => {
-    const client = createApiClient();
-    return createInventoryApi({ request: client });
+    return createInventoryApi({ request: createApiRequestWrapper(apiRequest) });
   }, []);
 
   const loadData = useCallback(async () => {

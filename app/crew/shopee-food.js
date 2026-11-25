@@ -1,16 +1,15 @@
 // CrewShopeeFoodScreen — Pemesanan dari platform eksternal (ShopeeFood/Grab)
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
-import { createShopeeApi } from '../../src/api/shopee';
-import { createApiClient } from '../../src/api/api';
+import { createCatalogApi } from '../../src/api/catalog';
+import { createOrdersApi } from '../../src/api/orders';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
 import BaseButton from '../../src/components/BaseButton';
-import Badge from '../../src/components/Badge';
 import EmptyState from '../../src/components/EmptyState';
-import ScreenFrame from '../../src/components/ScreenFrame';
 import AppShell from '../../src/components/AppShell';
 import Notice from '../../src/components/Notice';
 
@@ -20,20 +19,43 @@ function formatRupiah(value) {
 }
 
 export default function CrewShopeeFoodScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
-  const crewId = user?.id;
 
+  const [catalog, setCatalog] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     platformOrderNumber: '',
-    shopeeProduct: '',
     quantity: '',
-    amount: '',
-    paymentMethod: 'COD',
+    paymentMethod: 'CASH',
   });
+  const [selectedVariant, setSelectedVariant] = useState(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  const loadCatalog = useCallback(async () => {
+    if (!outletId) return;
+    try {
+      const catalogApi = createCatalogApi({ request: createApiRequestWrapper(apiRequest) });
+      const data = await catalogApi.getCatalog(outletId);
+      setCatalog(data);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Katalog gagal dimuat.');
+    } finally {
+      setLoading(false);
+    }
+  }, [outletId, apiRequest]);
+
+  useEffect(() => {
+    loadCatalog();
+  }, [loadCatalog]);
+
+  const products = catalog?.data?.products ?? [];
+  const flatVariants = products.flatMap((product) =>
+    product.variants.map((variant) => ({ ...variant, productName: product.name })),
+  );
 
   const handleSubmit = async () => {
     setError(null);
@@ -41,40 +63,35 @@ export default function CrewShopeeFoodScreen() {
       setError('Nomor pesanan platform wajib diisi.');
       return;
     }
-    if (!form.shopeeProduct.trim()) {
-      setError('Nama produk Shopee wajib diisi.');
+    if (!selectedVariant) {
+      setError('Pilih produk dan varian dari katalog.');
       return;
     }
     if (!(Number(form.quantity) > 0)) {
       setError('Jumlah harus lebih dari 0.');
       return;
     }
-    if (!(Number(form.amount) > 0)) {
-      setError('Nominal pembayaran harus lebih dari 0.');
-      return;
-    }
 
     try {
       setSaving(true);
-      const client = createApiClient();
-      const shopeeApi = createShopeeApi({ request: client });
-      await shopeeApi.createOrder(outletId, {
-        clientTransactionId: `shopee-${Date.now()}`,
+      const ordersApi = createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
+      await ordersApi.createOrder(outletId, {
+        platformOrderId: form.platformOrderNumber.trim(),
         recordedOffline: false,
         paymentMethod: form.paymentMethod,
-        payments: [{ paymentMethod: 'CASH', amount: formatRupiah(form.amount) }],
         items: [
           {
-            productVariantId: `shopee-${form.shopeeProduct.trim()}`,
+            productVariantId: selectedVariant.id,
             quantity: Number(form.quantity),
-            expectedVariantPrice: formatRupiah(form.amount),
+            expectedVariantPrice: selectedVariant.price,
             addOns: [],
           },
         ],
       });
       setSaved(true);
-      Alert.alert('Berhasil', 'Pesanan ShopeeFood berhasil disimpan.');
-      setForm({ platformOrderNumber: '', shopeeProduct: '', quantity: '', amount: '', paymentMethod: 'COD' });
+      Alert.alert('Berhasil', 'Pesanan ShopeeFood berhasil disimpan sebagai pesanan POS berlabel ShopeeFood.');
+      setForm({ platformOrderNumber: '', quantity: '', paymentMethod: 'CASH' });
+      setSelectedVariant(null);
     } catch (err) {
       setError(err?.message || 'Pesanan ShopeeFood gagal disimpan.');
     } finally {
@@ -115,14 +132,30 @@ export default function CrewShopeeFoodScreen() {
               />
 
               <View style={styles.rowBetween}>
-                <Text style={styles.label}>Nama produk Shopee</Text>
-                <Text style={styles.hint}>Contoh: Teh Tarik Original</Text>
+                <Text style={styles.label}>Produk & varian</Text>
+                <Text style={styles.hint}>Dari katalog outlet</Text>
               </View>
-              <Input
-                value={form.shopeeProduct}
-                onChangeText={(v) => setForm({ ...form, shopeeProduct: v })}
-                placeholder="Teh Tarik Original"
-              />
+              {loading ? (
+                <Text style={styles.hint}>Memuat katalog...</Text>
+              ) : flatVariants.length === 0 ? (
+                <EmptyState
+                  title="Katalog kosong"
+                  description="Tidak ada produk aktif untuk outlet ini."
+                />
+              ) : (
+                flatVariants.map((variant) => (
+                  <TouchableOpacity
+                    key={variant.id}
+                    style={[styles.methodRow, selectedVariant?.id === variant.id && styles.methodRowActive]}
+                    onPress={() => setSelectedVariant(variant)}
+                  >
+                    <View style={styles.methodDot} />
+                    <Text style={[styles.methodText, selectedVariant?.id === variant.id && styles.methodTextActive]}>
+                      {variant.productName} · {variant.name} · Rp {formatRupiah(variant.price)}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              )}
 
               <View style={styles.rowBetween}>
                 <Text style={styles.label}>Quantity</Text>
@@ -135,33 +168,29 @@ export default function CrewShopeeFoodScreen() {
                 keyboardType="numeric"
               />
 
-              <View style={styles.rowBetween}>
-                <Text style={styles.label}>Nominal (Rp)</Text>
-                <Text style={styles.hint}>Total bayar dari Shopee</Text>
-              </View>
-              <Input
-                value={form.amount}
-                onChangeText={(v) => setForm({ ...form, amount: v })}
-                placeholder="15000"
-                keyboardType="numeric"
-              />
-
               <Text style={styles.sectionTitle}>Metode pembayaran</Text>
-              <TouchableOpacity
-                style={[styles.methodRow, form.paymentMethod === 'COD' && styles.methodRowActive]}
-                onPress={() => setForm({ ...form, paymentMethod: 'COD' })}
-              >
-                <View style={styles.methodDot} />
-                <Text style={[styles.methodText, form.paymentMethod === 'COD' && styles.methodTextActive]}>
-                  COD (Cash on Delivery)
-                </Text>
-                <Text style={[styles.methodPilih, form.paymentMethod === 'COD' && styles.methodPilihActive]}>
-                  PILIH
-                </Text>
-              </TouchableOpacity>
+              {[
+                { key: 'CASH', label: 'Cash / COD (diterima di outlet)' },
+                { key: 'QRIS', label: 'QRIS (menunggu verifikasi kasir)' },
+              ].map((method) => (
+                <TouchableOpacity
+                  key={method.key}
+                  style={[styles.methodRow, form.paymentMethod === method.key && styles.methodRowActive]}
+                  onPress={() => setForm({ ...form, paymentMethod: method.key })}
+                >
+                  <View style={styles.methodDot} />
+                  <Text style={[styles.methodText, form.paymentMethod === method.key && styles.methodTextActive]}>
+                    {method.label}
+                  </Text>
+                  <Text style={[styles.methodPilih, form.paymentMethod === method.key && styles.methodPilihActive]}>
+                    PILIH
+                  </Text>
+                </TouchableOpacity>
+              ))}
 
               <Text style={styles.priceNote}>
-                * Pembayaran COD diterima di loket saat driver mengantarkan pesanan.
+                * Total dihitung backend dari harga katalog. Pesanan tercatat sebagai pesanan POS
+                dengan penanda sumber ShopeeFood.
               </Text>
             </Card>
 
@@ -210,7 +239,8 @@ export default function CrewShopeeFoodScreen() {
           <View style={styles.settlementNote}>
             <Text style={styles.settlementNoteTitle}>Settlement</Text>
             <Text style={styles.settlementNoteText}>
-              Nomor pesanan: {form.platformOrderNumber || '—'} · Total: Rp {formatRupiah(form.amount)}
+              Nomor pesanan: {form.platformOrderNumber || '—'}
+              {selectedVariant ? ` · ${selectedVariant.productName} ${selectedVariant.name} · Rp ${formatRupiah(selectedVariant.price)}` : ''}
             </Text>
           </View>
 

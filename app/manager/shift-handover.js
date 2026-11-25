@@ -1,10 +1,10 @@
 // ManagerShiftHandoverScreen — Terima & konfirmasi serah terima shift (Manager)
 // Figma: 17 · Manager · Terima serah terima · Tablet · Prototype
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
-import { createShopeeApi } from '../../src/api/shopee';
-import { createApiClient } from '../../src/api/api';
+import { createShiftHandoverApi } from '../../src/shift-handover/api';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
@@ -14,62 +14,58 @@ import ScreenFrame from '../../src/components/ScreenFrame';
 import AppShell from '../../src/components/AppShell';
 import Notice from '../../src/components/Notice';
 
-function formatRupiah(value) {
-  if (!value) return '0';
-  return Number(value).toLocaleString('id-ID');
-}
-
 export default function ManagerShiftHandoverScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
 
-  const [pendingId, setPendingId] = useState(null);
-  const [cashVerification, setCashVerification] = useState('');
-  const [checklistAgenda, setChecklistAgenda] = useState('');
-  const [checklistServer, setChecklistServer] = useState('');
-  const [notes, setNotes] = useState('');
+  const [pending, setPending] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [notes, setNotes] = useState('');
 
-  const handleAccept = async () => {
-    setError(null);
-    if (!cashVerification.trim()) {
-      setError('Verifikasi kas wajib diisi.');
-      return;
+  const loadPending = useCallback(async () => {
+    if (!outletId) return;
+    try {
+      const api = createShiftHandoverApi({ request: createApiRequestWrapper(apiRequest) });
+      const handovers = await api.listPending(outletId);
+      setPending(handovers);
+      setSelectedId((current) => current ?? handovers[0]?.id ?? null);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Daftar serah terima gagal dimuat.');
+    } finally {
+      setLoading(false);
     }
-    if (!checklistAgenda.trim()) {
-      setError('Agenda checklist wajib diisi.');
-      return;
-    }
-    if (!checklistServer.trim()) {
-      setError('Checklist service wajib diisi.');
-      return;
-    }
+  }, [outletId, apiRequest]);
 
+  useEffect(() => {
+    loadPending();
+  }, [loadPending]);
+
+  const selected = pending.find((item) => item.id === selectedId) ?? null;
+
+  const handleDecide = async (status) => {
+    if (!selected) {
+      setError('Pilih permintaan serah terima terlebih dahulu.');
+      return;
+    }
     try {
       setSaving(true);
-      const client = createApiClient();
-      const shopeeApi = createShopeeApi({ request: client });
-      // Simpan konfirmasi serah terima (bekas permintaan crew)
-      await shopeeApi.createOrder(outletId, {
-        clientTransactionId: `handover-accept-${Date.now()}`,
-        recordedOffline: false,
-        paymentMethod: 'CASH',
-        payments: [
-          { paymentMethod: 'CASH', amount: formatRupiah(cashVerification.trim()) },
-        ],
-        items: [
-          {
-            productVariantId: 'handover-accept',
-            quantity: 1,
-            expectedVariantPrice: '0',
-            addOns: [],
-          },
-        ],
+      const api = createShiftHandoverApi({ request: createApiRequestWrapper(apiRequest) });
+      await api.decide(outletId, selected.id, {
+        status,
+        notes: notes.trim() || undefined,
       });
       setConfirmed(true);
-      Alert.alert('Berhasil', 'Serah terima shift berhasil dikonfirmasi.');
+      Alert.alert(
+        'Berhasil',
+        status === 'ACCEPTED'
+          ? 'Serah terima shift berhasil dikonfirmasi.'
+          : 'Serah terima shift ditolak.',
+      );
     } catch (err) {
       setError(err?.message || 'Konfirmasi serah terima gagal.');
     } finally {
@@ -119,58 +115,69 @@ export default function ManagerShiftHandoverScreen() {
       >
         {error && <Notice message={error} type="error" />}
 
-        <Card style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Verifikasi kas</Text>
-          <Input
-            value={cashVerification}
-            onChangeText={(v) => setCashVerification(v)}
-            placeholder="Jumlah kas yang diterima (Rp)"
-            keyboardType="numeric"
+        {loading ? (
+          <Text style={styles.hint}>Memuat permintaan serah terima...</Text>
+        ) : pending.length === 0 ? (
+          <EmptyState
+            title="Tidak ada permintaan"
+            description="Belum ada permintaan serah terima shift yang menunggu konfirmasi."
           />
+        ) : (
+          <Card style={styles.formCard}>
+            <Text style={styles.sectionTitle}>Permintaan menunggu konfirmasi</Text>
+            {pending.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.requestRow, selectedId === item.id && styles.requestRowActive]}
+                onPress={() => setSelectedId(item.id)}
+              >
+                <Text style={styles.requestTitle}>{item.crewName || 'Crew'}</Text>
+                <Text style={styles.hint}>
+                  {item.currentOutlet} → {item.nextOutlet}
+                  {item.notes ? ` · ${item.notes}` : ''}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </Card>
+        )}
 
-          <Text style={styles.sectionTitle}>Agenda checklist</Text>
-          <Input
-            value={checklistAgenda}
-            onChangeText={(v) => setChecklistAgenda(v)}
-            placeholder="Cek: SLI, KTM, stok, PR waste, dsb."
-            multiline
-            numberOfLines={3}
-          />
+        {selected && (
+          <Card style={styles.formCard}>
+            <Text style={styles.sectionTitle}>Catatan konfirmasi</Text>
+            <Input
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Catatan untuk crew (opsional)"
+              multiline
+              numberOfLines={3}
+            />
+          </Card>
+        )}
 
-          <View style={styles.rowBetween}>
-            <Text style={styles.label}>Checklist service</Text>
-            <Text style={styles.hint}>SLI / KTM / Laporan</Text>
+        {selected && (
+          <View style={styles.actionRow}>
+            <BaseButton
+              label="Tolak"
+              onPress={() => handleDecide('REJECTED')}
+              variant="secondary"
+              size="lg"
+              loading={saving}
+              disabled={saving}
+              style={styles.actionButton}
+            />
+            <BaseButton
+              label="Konfirmasi"
+              onPress={() => handleDecide('ACCEPTED')}
+              size="lg"
+              loading={saving}
+              disabled={saving}
+              style={styles.actionButton}
+            />
           </View>
-          <Input
-            value={checklistServer}
-            onChangeText={(v) => setChecklistServer(v)}
-            placeholder="Contoh: SLI terlaksana, KTM terbit, laporan bulanan diunggah"
-            multiline
-            numberOfLines={3}
-          />
-
-          <Text style={styles.sectionTitle}>Catatan tambahan</Text>
-          <Input
-            value={notes}
-            onChangeText={(v) => setNotes(v)}
-            placeholder="Catatan untuk crew berikutnya"
-            multiline
-            numberOfLines={3}
-          />
-        </Card>
-
-        <BaseButton
-          label="Konfirmasi serah terima"
-          onPress={handleAccept}
-          fullWidth
-          size="lg"
-          loading={saving}
-          disabled={saving}
-          style={styles.saveButton}
-        />
+        )}
 
         <Text style={styles.safeguard}>
-          ⚠️ Pastikan kas, checklist, dan catatan sudah sesuai sebelum mengkonfirmasi.
+          ⚠️ Pastikan kas dan serah terima sudah sesuai sebelum mengkonfirmasi.
         </Text>
       </ScrollView>
     </AppShell>
@@ -205,6 +212,29 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     backgroundColor: colors.light.primary,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  actionButton: {
+    flex: 1,
+  },
+  requestRow: {
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: 2,
+  },
+  requestRowActive: {
+    borderColor: colors.light.primary,
+    backgroundColor: colors.light.surfaceMuted,
+  },
+  requestTitle: {
+    ...typography.fontFamily.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.light.textPrimary,
   },
   safeguard: {
     ...typography.fontFamily.regular,

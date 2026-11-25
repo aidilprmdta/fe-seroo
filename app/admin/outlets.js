@@ -2,7 +2,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { createAdminApi } from '../../src/api/admin';
-import { createApiClient } from '../../src/api/api';
+import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
+import { useAuth } from '../../src/auth/AuthContext';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import { useResponsive } from '../../src/theme/responsive';
 import Card from '../../src/components/Card';
@@ -19,6 +20,7 @@ const EMPTY_FORM = { code: '', name: '', address: '' };
 
 export default function AdminOutletsScreen() {
   const r = useResponsive();
+  const { apiRequest } = useAuth();
   const [outlets, setOutlets] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [modalVisible, setModalVisible] = useState(false);
@@ -28,8 +30,7 @@ export default function AdminOutletsScreen() {
 
   const loadOutlets = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const api = createAdminApi({ request: client });
+      const api = createAdminApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await api.listOutlets();
       setOutlets(data?.data?.outlets || []);
       setError(null);
@@ -52,8 +53,7 @@ export default function AdminOutletsScreen() {
     setSaving(true);
     setError(null);
     try {
-      const client = createApiClient();
-      const api = createAdminApi({ request: client });
+      const api = createAdminApi({ request: createApiRequestWrapper(apiRequest) });
       await api.createOutlet({
         code: form.code.trim().toUpperCase(),
         name: form.name.trim(),
@@ -71,8 +71,7 @@ export default function AdminOutletsScreen() {
 
   const handleToggle = async (outlet) => {
     try {
-      const client = createApiClient();
-      const api = createAdminApi({ request: client });
+      const api = createAdminApi({ request: createApiRequestWrapper(apiRequest) });
       await api.updateOutlet(outlet.id, { isActive: !outlet.isActive });
       await loadOutlets();
     } catch (err) {

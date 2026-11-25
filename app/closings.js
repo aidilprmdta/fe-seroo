@@ -4,7 +4,7 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, A
 import * as Crypto from 'expo-crypto';
 import { useAuth } from '../src/auth/AuthContext';
 import { createClosingsApi } from '../src/api/closings';
-import { createApiClient } from '../src/api/api';
+import { createApiRequestWrapper } from '../src/api/api';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
 import Card from '../src/components/Card';
 import ListItem from '../src/components/ListItem';
@@ -63,7 +63,7 @@ function formatRupiah(value) {
 }
 
 export default function ClosingsScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection.activeOutletId;
   const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
   const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';
@@ -111,8 +111,7 @@ export default function ClosingsScreen() {
 
   const loadClosings = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const closingsApi = createClosingsApi({ request: client });
+      const closingsApi = createClosingsApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await closingsApi.listClosings(outletId);
       setClosings(data.data?.closings || []);
       await checkPendingOutbox();
@@ -129,8 +128,7 @@ export default function ClosingsScreen() {
 
   const handleOpenCash = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const closingsApi = createClosingsApi({ request: client });
+      const closingsApi = createClosingsApi({ request: createApiRequestWrapper(apiRequest) });
       await closingsApi.createCashOpening(outletId, {
         periodKey,
         openingCash: Number(openData.openingCash),
@@ -145,8 +143,7 @@ export default function ClosingsScreen() {
 
   const handleReconcile = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const closingsApi = createClosingsApi({ request: client });
+      const closingsApi = createClosingsApi({ request: createApiRequestWrapper(apiRequest) });
       await closingsApi.createClosing(outletId, {
         closingType: 'DAILY',
         periodKey,
@@ -175,8 +172,7 @@ export default function ClosingsScreen() {
     }
     setReopening(true);
     try {
-      const client = createApiClient();
-      const closingsApi = createClosingsApi({ request: client });
+      const closingsApi = createClosingsApi({ request: createApiRequestWrapper(apiRequest) });
       await closingsApi.reopenClosing(outletId, reopenTarget.id, {
         clientTransactionId: uuidv4(),
         closingId: reopenTarget.id,
@@ -200,8 +196,7 @@ export default function ClosingsScreen() {
     }
     setPreviewLoading(true);
     try {
-      const client = createApiClient();
-      const closingsApi = createClosingsApi({ request: client });
+      const closingsApi = createClosingsApi({ request: createApiRequestWrapper(apiRequest) });
       const data = await closingsApi.getClosingPreview(outletId, {
         type: 'DAILY',
         periodKey: periodKey.trim(),

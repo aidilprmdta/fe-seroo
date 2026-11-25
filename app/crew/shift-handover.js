@@ -3,24 +3,30 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
-import { createShopeeApi } from '../../src/api/shopee';
-import { createApiClient } from '../../src/api/api';
+import { createShiftHandoverApi } from '../../src/shift-handover/api';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
 import BaseButton from '../../src/components/BaseButton';
-import EmptyState from '../../src/components/EmptyState';
-import ScreenFrame from '../../src/components/ScreenFrame';
 import AppShell from '../../src/components/AppShell';
 import Notice from '../../src/components/Notice';
 
-function formatRupiah(value) {
-  if (!value) return '0';
-  return Number(value).toLocaleString('id-ID');
+// Backend hanya menyimpan `notes` (max 500), jadi rincian kas & checklist
+// digabung ke sana. shortcut: field terpisah menunggu perubahan schema.
+function buildHandoverNotes({ summary, cashHandover, checklistAgenda, checklistServer, notes }) {
+  const parts = [
+    `Ringkasan: ${summary.trim()}`,
+    `Kas: ${cashHandover.trim()}`,
+    `Agenda: ${checklistAgenda.trim()}`,
+    `Service: ${checklistServer.trim()}`,
+    notes.trim() ? `Catatan: ${notes.trim()}` : null,
+  ].filter(Boolean);
+  return parts.join(' | ').slice(0, 500);
 }
 
 export default function CrewShiftHandoverScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
 
   const [summary, setSummary] = useState('');
@@ -53,35 +59,14 @@ export default function CrewShiftHandoverScreen() {
 
     try {
       setSaving(true);
-      const client = createApiClient();
-      const shopeeApi = createShopeeApi({ request: client });
-      await shopeeApi.createOrder(outletId, {
-        clientTransactionId: `handover-${Date.now()}`,
-        recordedOffline: false,
-        paymentMethod: 'CASH',
-        payments: [
-          { paymentMethod: 'CASH', amount: formatRupiah(cashHandover.trim()) },
-        ],
-        items: [
-          {
-            productVariantId: 'handover-summary',
-            quantity: 1,
-            expectedVariantPrice: '0',
-            addOns: [],
-          },
-          {
-            productVariantId: 'handover-agenda',
-            quantity: 1,
-            expectedVariantPrice: '0',
-            addOns: [],
-          },
-          {
-            productVariantId: 'handover-server',
-            quantity: 1,
-            expectedVariantPrice: '0',
-            addOns: [],
-          },
-        ],
+      const api = createShiftHandoverApi({ request: createApiRequestWrapper(apiRequest) });
+      await api.requestHandover(outletId, {
+        currentOutlet: outletId,
+        nextOutlet: outletId,
+        crewUserId: user?.id,
+        crewName: user?.name,
+        handoverAt: new Date().toISOString(),
+        notes: buildHandoverNotes({ summary, cashHandover, checklistAgenda, checklistServer, notes }),
       });
       setSubmitted(true);
       Alert.alert('Berhasil', 'Permintaan serah terima shift berhasil dikirim ke Manager.');

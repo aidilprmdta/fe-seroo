@@ -4,7 +4,7 @@ import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, 
 import * as Crypto from 'expo-crypto';
 import { useAuth } from '../src/auth/AuthContext';
 import { createWasteApi } from '../src/api/waste';
-import { createApiClient } from '../src/api/api';
+import { createApiRequestWrapper } from '../src/api/api';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
 import Card from '../src/components/Card';
 import ListItem from '../src/components/ListItem';
@@ -32,7 +32,7 @@ function toIsoDate(dateKey) {
 }
 
 export default function WasteScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection.activeOutletId;
   const activeRole = user?.memberships?.find((m) => m.outletId === outletId)?.role || selection.activeRole;
   const isOwner = activeRole === 'OWNER_MITRA' || activeRole === 'OWNER';

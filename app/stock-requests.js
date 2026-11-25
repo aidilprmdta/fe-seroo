@@ -5,7 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { useAuth } from '../src/auth/AuthContext';
 import { createStockRequestsApi } from '../src/api/stock-requests';
 import { createInventoryApi } from '../src/api/inventory';
-import { createApiClient } from '../src/api/api';
+import { createApiRequestWrapper } from '../src/api/api';
 import { colors, spacing, typography, radii } from '../src/theme/tokens';
 import Card from '../src/components/Card';
 import Input from '../src/components/Input';
@@ -32,7 +32,7 @@ function statusLabel(status) {
 }
 
 export default function StockRequestsScreen() {
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const outletId = selection.activeOutletId;
   const role = user?.memberships?.find((m) => m.outletId === outletId)?.role;
 
@@ -47,12 +47,12 @@ export default function StockRequestsScreen() {
   const [decision, setDecision] = useState(null);
 
   const getApi = useCallback(() => {
-    const client = createApiClient();
+    const request = createApiRequestWrapper(apiRequest);
     return {
-      stockApi: createStockRequestsApi({ request: client }),
-      inventoryApi: createInventoryApi({ request: client }),
+      stockApi: createStockRequestsApi({ request }),
+      inventoryApi: createInventoryApi({ request }),
     };
-  }, []);
+  }, [apiRequest]);
 
   const loadRequests = useCallback(async () => {
     try {
