@@ -18,8 +18,11 @@ import PrimaryButton from "../../src/components/PrimaryButton";
 import ProfileButton from "../../src/components/ProfileButton";
 import ScreenFrame from "../../src/components/ScreenFrame";
 import Badge from "../../src/components/Badge";
+import BarChart from "../../src/components/BarChart";
 import { createDashboardApi } from "../../src/dashboard/api";
 import { createCatalogApi } from "../../src/api/catalog";
+import { createReportApi } from "../../src/reports/api";
+import { getSevenDaySales } from "../../src/dashboard/chartData";
 import { colors, spacing } from "../../src/theme/tokens";
 
 function formatRupiah(value) {
@@ -62,6 +65,9 @@ export default function ManagerDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
+  const [chartSeries, setChartSeries] = useState([]);
+  const [chartLoading, setChartLoading] = useState(true);
+  const [chartError, setChartError] = useState(null);
 
   // State ketersediaan menu per outlet
   const [products, setProducts] = useState([]);
@@ -86,6 +92,29 @@ export default function ManagerDashboardScreen() {
     }
   }, [api, outletId]);
 
+  const loadChart = useCallback(async () => {
+    if (!outletId) {
+      setChartLoading(false);
+      return;
+    }
+    setChartLoading(true);
+    setChartError(null);
+    try {
+      const reportsApi = createReportApi({ request: apiRequest });
+      const series = await getSevenDaySales({ reportsApi, outletId });
+      setChartSeries(series);
+    } catch (err) {
+      setChartError(err.message || "Gagal memuat tren penjualan.");
+    } finally {
+      setChartLoading(false);
+    }
+  }, [apiRequest, outletId]);
+
+  const refreshAll = useCallback(() => {
+    loadDashboard();
+    loadChart();
+  }, [loadDashboard, loadChart]);
+
   const loadProductAvailability = useCallback(async () => {
     if (!outletId) return;
     setLoadingProducts(true);
@@ -103,8 +132,9 @@ export default function ManagerDashboardScreen() {
 
   useEffect(() => {
     loadDashboard();
+    loadChart();
     loadProductAvailability();
-  }, [loadDashboard, loadProductAvailability]);
+  }, [loadDashboard, loadChart, loadProductAvailability]);
 
   const handleToggleAvailability = useCallback(
     async (productId, currentStatus) => {
@@ -155,6 +185,10 @@ export default function ManagerDashboardScreen() {
   }, [products, selectedCategory, productSearch]);
 
   const dailyStatus = data?.closingStatus?.daily?.status || "OPEN";
+  const chartRangeLabel = chartSeries.length
+    ? `${chartSeries[0].label} – ${chartSeries[chartSeries.length - 1].label}`
+    : "";
+  const chartTotal = chartSeries.reduce((sum, item) => sum + item.value, 0);
 
   return (
     <ScreenFrame>
@@ -292,6 +326,36 @@ export default function ManagerDashboardScreen() {
               >
                 <Text style={styles.bannerActionText}>Kelola Closing ›</Text>
               </Pressable>
+            </View>
+
+            {/* Tren penjualan 7 hari */}
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Tren Penjualan 7 Hari Terakhir</Text>
+                <Pressable onPress={loadChart} style={styles.refreshBtn} disabled={chartLoading}>
+                  <Text style={styles.refreshBtnText}>
+                    {chartLoading ? "Memuat..." : "Perbarui"}
+                  </Text>
+                </Pressable>
+              </View>
+              <Text style={styles.cardSubtitle}>
+                {chartRangeLabel ? `${chartRangeLabel} · ` : ""}Transaksi POS selesai, dihitung per hari
+              </Text>
+              {chartLoading ? (
+                <View style={styles.loadingBox}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.loadingText}>Memuat tren penjualan...</Text>
+                </View>
+              ) : chartError ? (
+                <Notice variant="danger">{chartError}</Notice>
+              ) : (
+                <>
+                  <BarChart data={chartSeries} height={isWide ? 180 : 140} />
+                  <Text style={styles.chartTotal}>
+                    Total 7 hari: Rp {formatRupiah(chartTotal)}
+                  </Text>
+                </>
+              )}
             </View>
 
             {/* Pengaturan Ketersediaan Menu Outlet */}
@@ -436,7 +500,7 @@ export default function ManagerDashboardScreen() {
                 <Text style={styles.cardTitle}>
                   Penjualan & Pengeluaran Hari Ini
                 </Text>
-                <Pressable onPress={loadDashboard} style={styles.refreshBtn}>
+                <Pressable onPress={refreshAll} style={styles.refreshBtn}>
                   <Text style={styles.refreshBtnText}>Perbarui</Text>
                 </Pressable>
               </View>
@@ -695,6 +759,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     fontSize: 14,
     color: colors.textSecondary,
+  },
+  chartTotal: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    textAlign: "right",
   },
   dashboardContent: {
     gap: spacing.md,

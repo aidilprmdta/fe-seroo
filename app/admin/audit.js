@@ -1,12 +1,11 @@
 // AdminAuditScreen — Figma 171:206 · Audit Log (role-aware)
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from 'react-native';
+import { View, Text, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
 import { createAdminApi } from '../../src/api/admin';
-import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
+import { createApiRequestWrapper } from '../../src/api/api';
 import { useAuth } from '../../src/auth/AuthContext';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
-import ScreenFrame from '../../src/components/ScreenFrame';
-import ActivityNav from '../../src/components/ActivityNav';
+import AppShell from '../../src/components/AppShell';
 import StateCard from '../../src/components/StateCard';
 import Notice from '../../src/components/Notice';
 
@@ -25,9 +24,6 @@ export default function AdminAuditScreen() {
   const [error, setError] = useState(null);
 
   const role = user?.memberships?.find((m) => m.outletId === selection.activeOutletId)?.role;
-  const roleLabel = role === 'ADMIN_PUSAT' ? 'OWNER PUSAT'
-    : role === 'OWNER_MITRA' || role === 'OWNER' ? 'OWNER MITRA'
-    : role === 'MANAGER' ? 'MANAGER' : 'CREW OUTLET';
   const scope = role === 'ADMIN_PUSAT' ? 'Ruang lingkup: seluruh outlet'
     : `Ruang lingkup: ${selection.activeOutletId || 'outlet aktif'}`;
   const title = role === 'ADMIN_PUSAT' ? 'Audit Log Pusat'
@@ -61,89 +57,73 @@ export default function AdminAuditScreen() {
   });
 
   return (
-    <ScreenFrame>
-      <View style={styles.root}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadLogs} />}
-        >
-          <View style={styles.brandRow}>
-            <Text style={styles.brand}>Seroo.</Text>
-            <Text style={styles.role}>{roleLabel}</Text>
-          </View>
-          <Text style={styles.scope}>{scope}</Text>
-          <View style={styles.divider} />
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>{title}</Text>
-            <View style={styles.badge}><Text style={styles.badgeText}>CONTOH DATA</Text></View>
-          </View>
+    <AppShell
+      navRole="ownerPusat"
+      active="keamanan"
+      title={title}
+      subtitle={scope}
+      roleLabel="OWNER PUSAT"
+      outletLabel="AKSES GLOBAL"
+      scopeLabel="AKSES GLOBAL"
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={loadLogs} />
+      }
+    >
+      <View style={styles.content}>
+        {error ? <Notice message={error} type="error" /> : null}
 
-          {error ? <Notice message={error} type="error" /> : null}
+        <View style={styles.chips}>
+          {FILTERS.map((item) => (
+            <TouchableOpacity
+              key={item.key}
+              style={[styles.chip, filter === item.key && styles.chipActive]}
+              onPress={() => setFilter(item.key)}
+            >
+              <Text style={[styles.chipText, filter === item.key && styles.chipTextActive]}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-          <View style={styles.chips}>
-            {FILTERS.map((item) => (
-              <TouchableOpacity
-                key={item.key}
-                style={[styles.chip, filter === item.key && styles.chipActive]}
-                onPress={() => setFilter(item.key)}
-              >
-                <Text style={[styles.chipText, filter === item.key && styles.chipTextActive]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {loading ? (
+          <StateCard title="Memuat data" tone="loading" description="Menyiapkan riwayat aktivitas outlet." />
+        ) : visible.length === 0 ? (
+          <StateCard
+            title="Belum ada aktivitas"
+            tone="empty"
+            description="Audit log akan muncul setelah ada transaksi atau perubahan data."
+          />
+        ) : (
+          visible.map((log) => (
+            <View key={log.id} style={styles.logCard}>
+              <Text style={styles.logTag}>
+                {(log.createdAt || '').slice(11, 16).replace(':', '.')} · {(log.resourceType || 'AKUN').toUpperCase()}
+              </Text>
+              <Text style={styles.logTitle}>{log.action}</Text>
+              <Text style={styles.logActor}>
+                {log.actor?.name || 'Sistem'} · {log.outcome || 'SUCCESS'}
+              </Text>
+              <Text style={styles.logBody}>
+                {log.actor?.email || 'Aktivitas sistem'} · {(log.createdAt || '').slice(0, 10)}
+              </Text>
+            </View>
+          ))
+        )}
 
-          {loading ? (
-            <StateCard title="Memuat data" tone="loading" description="Menyiapkan riwayat aktivitas outlet." />
-          ) : visible.length === 0 ? (
-            <StateCard
-              title="Belum ada aktivitas"
-              tone="empty"
-              description="Audit log akan muncul setelah ada transaksi atau perubahan data."
-            />
-          ) : (
-            visible.map((log) => (
-              <View key={log.id} style={styles.logCard}>
-                <Text style={styles.logTag}>
-                  {(log.createdAt || '').slice(11, 16).replace(':', '.')} · {(log.resourceType || 'AKUN').toUpperCase()}
-                </Text>
-                <Text style={styles.logTitle}>{log.action}</Text>
-                <Text style={styles.logActor}>
-                  {log.actor?.name || 'Sistem'} · {log.outcome || 'SUCCESS'}
-                </Text>
-                <Text style={styles.logBody}>
-                  {log.actor?.email || 'Aktivitas sistem'} · {(log.createdAt || '').slice(0, 10)}
-                </Text>
-              </View>
-            ))
-          )}
-
-          <Text style={styles.footer}>
-            {role === 'ADMIN_PUSAT'
-              ? 'Akses global khusus Owner Pusat.'
-              : 'Aktivitas dibatasi oleh role dan outlet aktif.'}
-          </Text>
-        </ScrollView>
-        <ActivityNav />
+        <Text style={styles.footer}>
+          {role === 'ADMIN_PUSAT'
+            ? 'Akses global khusus Owner Pusat.'
+            : 'Aktivitas dibatasi oleh role dan outlet aktif.'}
+        </Text>
       </View>
-    </ScreenFrame>
+    </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.light.background },
-  content: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xl },
-  brandRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
-  brand: { ...typography.fontFamily.display, fontSize: 28, color: colors.light.primary },
-  role: { ...typography.fontFamily.bold, fontWeight: typography.weights.bold, fontSize: 9, color: colors.light.textSecondary, marginBottom: spacing.sm },
-  scope: { ...typography.fontFamily.medium, fontSize: 10, color: colors.light.maroon, marginTop: spacing.sm },
-  divider: { height: 1, backgroundColor: colors.light.border, marginVertical: spacing.md },
-  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { ...typography.fontFamily.display, fontSize: 25, color: colors.light.textPrimary },
-  badge: { backgroundColor: colors.light.surfaceMuted, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-  badgeText: { ...typography.fontFamily.bold, fontWeight: typography.weights.bold, fontSize: 9, color: colors.light.maroon },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginVertical: spacing.md },
+  content: { gap: spacing.md },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: { height: 31, borderRadius: 16, borderWidth: 1, borderColor: colors.light.border, backgroundColor: colors.light.surface, paddingHorizontal: spacing.md, alignItems: 'center', justifyContent: 'center' },
   chipActive: { backgroundColor: colors.light.primary, borderColor: colors.light.primary },
   chipText: { ...typography.fontFamily.semibold, fontWeight: typography.weights.semibold, fontSize: 10, color: colors.light.textSecondary },

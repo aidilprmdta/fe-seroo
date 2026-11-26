@@ -1,21 +1,18 @@
 // OwnerDashboardScreen — owner mitra dashboard (read-only)
-import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
 import { ROUTES } from '../../src/auth/routePolicy';
-import { createDashboardApi } from '../../src/api/dashboard';
-import { createOutletAccessApi } from '../../src/api/outlets';
-import { createApiClient } from '../../src/api/api';
+import { createDashboardApi } from '../../src/dashboard/api';
+import { createReportApi } from '../../src/reports/api';
+import { buildMonthlyComparison, jakartaMonthKey, monthLabel, shiftMonth } from '../../src/dashboard/chartData';
 import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import { useResponsive } from '../../src/theme/responsive';
 import Card from '../../src/components/Card';
 import ListItem from '../../src/components/ListItem';
-import Badge from '../../src/components/Badge';
-import EmptyState from '../../src/components/EmptyState';
-import ScreenFrame from '../../src/components/ScreenFrame';
-import AccountActions from '../../src/components/AccountActions';
 import AppShell from '../../src/components/AppShell';
+import BarChart from '../../src/components/BarChart';
 import Notice from '../../src/components/Notice';
 
 function formatRupiah(value) {
@@ -25,7 +22,7 @@ function formatRupiah(value) {
 
 export default function OwnerDashboardScreen() {
   const r = useResponsive();
-  const { user, selection } = useAuth();
+  const { user, selection, apiRequest } = useAuth();
   const router = useRouter();
   const outletId = selection.activeOutletId;
   const [data, setData] = useState({
@@ -39,24 +36,59 @@ export default function OwnerDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [monthKey, setMonthKey] = useState(jakartaMonthKey());
+  const [monthlyReport, setMonthlyReport] = useState(null);
+  const [chartLoading, setChartLoading] = useState(true);
+  const [chartError, setChartError] = useState(null);
+  const requestIdRef = useRef(0);
 
   const loadDashboard = useCallback(async () => {
     try {
-      const client = createApiClient();
-      const dashboardApi = createDashboardApi({ request: client });
+      const dashboardApi = createDashboardApi({ request: apiRequest });
       const response = await dashboardApi.getDashboard(outletId);
-      setData(response.data || {});
+      setData(response || {});
     } catch (err) {
       setError(err?.message || 'Dashboard gagal dimuat.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [outletId]);
+  }, [apiRequest, outletId]);
+
+  const loadMonthlyReport = useCallback(async () => {
+    if (!outletId) {
+      setChartLoading(false);
+      return;
+    }
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setChartLoading(true);
+    setChartError(null);
+    try {
+      const reportsApi = createReportApi({ request: apiRequest });
+      const report = await reportsApi.getMonthlyReport(outletId, monthKey);
+      if (requestId !== requestIdRef.current) return;
+      setMonthlyReport(report);
+    } catch (err) {
+      if (requestId !== requestIdRef.current) return;
+      setChartError(err?.message || 'Grafik bulanan gagal dimuat.');
+    } finally {
+      if (requestId === requestIdRef.current) setChartLoading(false);
+    }
+  }, [apiRequest, outletId, monthKey]);
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    loadMonthlyReport();
+  }, [loadMonthlyReport]);
+
+  const comparison = buildMonthlyComparison(monthlyReport).map((item, index) => ({
+    ...item,
+    color: index === 0 ? colors.light.primary : colors.light.primaryLight,
+  }));
 
   const metricCardStyle = [
     styles.metricCard,
@@ -115,6 +147,47 @@ export default function OwnerDashboardScreen() {
             </Text>
           </Card>
         </View>
+
+        {/* Monthly revenue vs expenses */}
+        <Card style={styles.chartCard}>
+          <View style={styles.chartHeader}>
+            <Text style={styles.chartTitle}>Pendapatan vs Pengeluaran</Text>
+            <View style={styles.monthStepper}>
+              <TouchableOpacity
+                accessibilityLabel="Bulan sebelumnya"
+                onPress={() => setMonthKey(shiftMonth(monthKey, -1))}
+                style={styles.monthButton}
+              >
+                <Text style={styles.monthButtonText}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.monthText}>{monthLabel(monthKey)}</Text>
+              <TouchableOpacity
+                accessibilityLabel="Bulan berikutnya"
+                onPress={() => setMonthKey(shiftMonth(monthKey, 1))}
+                style={styles.monthButton}
+              >
+                <Text style={styles.monthButtonText}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.chartSubtitle}>Ringkasan bulanan outlet ini</Text>
+          {chartLoading ? (
+            <View style={styles.chartState}>
+              <ActivityIndicator size="small" color={colors.light.primary} />
+              <Text style={styles.chartStateText}>Memuat grafik bulanan...</Text>
+            </View>
+          ) : chartError ? (
+            <Notice message={chartError} type="error" />
+          ) : (
+            <>
+              <BarChart data={comparison} height={170} />
+              <Text style={styles.chartFootnote}>
+                Pendapatan Rp {formatRupiah(monthlyReport?.summary?.totalIncome)} · Pengeluaran Rp{' '}
+                {formatRupiah(monthlyReport?.summary?.totalExpense)}
+              </Text>
+            </>
+          )}
+        </Card>
 
         {/* Outlet summary */}
         <Text style={styles.sectionTitle}>Ringkasan Outlet</Text>
@@ -206,13 +279,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    ...typography.fontFamily.medium,
+    fontFamily: typography.fontFamily.regular,
     ...typography.weights.semibold,
     fontSize: typography.sizes.xxl,
     color: colors.light.textPrimary,
   },
   subtitle: {
-    ...typography.fontFamily.regular,
+    fontFamily: typography.fontFamily.regular,
     fontSize: typography.sizes.base,
     color: colors.light.textSecondary,
   },
@@ -233,26 +306,93 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   metricLabel: {
-    ...typography.fontFamily.medium,
+    fontFamily: typography.fontFamily.regular,
     ...typography.weights.semibold,
     fontSize: typography.sizes.sm,
     color: colors.light.textSecondary,
   },
   metricValue: {
-    ...typography.fontFamily.medium,
+    fontFamily: typography.fontFamily.regular,
     ...typography.weights.semibold,
     fontSize: typography.sizes.lg,
     color: colors.light.textPrimary,
     marginTop: spacing.xs,
   },
   sectionTitle: {
-    ...typography.fontFamily.medium,
+    fontFamily: typography.fontFamily.regular,
     ...typography.weights.semibold,
     fontSize: typography.sizes.sm,
     color: colors.light.textSecondary,
     marginTop: spacing.lg,
   },
   listCard: {
+    marginTop: spacing.sm,
+  },
+  chartCard: {
+    marginTop: spacing.lg,
+  },
+  chartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  chartTitle: {
+    fontFamily: typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.light.textPrimary,
+  },
+  chartSubtitle: {
+    fontFamily: typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+    marginTop: 2,
+    marginBottom: spacing.md,
+  },
+  monthStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  monthButton: {
+    width: 30,
+    height: 30,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthButtonText: {
+    fontSize: 18,
+    color: colors.light.primary,
+    lineHeight: 20,
+  },
+  monthText: {
+    fontFamily: typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+    minWidth: 96,
+    textAlign: 'center',
+  },
+  chartState: {
+    paddingVertical: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  chartStateText: {
+    fontFamily: typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+  },
+  chartFootnote: {
+    fontFamily: typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
     marginTop: spacing.sm,
   },
   dot: {

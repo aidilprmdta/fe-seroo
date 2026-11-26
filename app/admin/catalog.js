@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { router } from "expo-router";
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,14 +11,11 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
-import { ROUTES } from "../../src/auth/routePolicy";
-import LogoutButton from "../../src/components/LogoutButton";
 import Notice from "../../src/components/Notice";
 import PrimaryButton from "../../src/components/PrimaryButton";
-import ProfileButton from "../../src/components/ProfileButton";
-import ScreenFrame from "../../src/components/ScreenFrame";
+import AppShell from "../../src/components/AppShell";
 import { createCatalogAdminApi } from "../../src/catalog/api";
-import { colors, spacing } from "../../src/theme/tokens";
+import { colors, spacing, typography, radii } from "../../src/theme/tokens";
 
 function formatRupiah(value) {
   if (value === null || value === undefined) return "0";
@@ -28,7 +24,7 @@ function formatRupiah(value) {
 }
 
 export default function AdminCatalogScreen() {
-  const { user, apiRequest, notice: authNotice } = useAuth();
+  const { apiRequest, notice: authNotice } = useAuth();
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
 
@@ -47,6 +43,7 @@ export default function AdminCatalogScreen() {
   const [prodName, setProdName] = useState("");
   const [prodCategory, setProdCategory] = useState("Minuman");
   const [prodDesc, setProdDesc] = useState("");
+  const [prodImageUrl, setProdImageUrl] = useState("");
   const [regPrice, setRegPrice] = useState("10000");
   const [lrgPrice, setLrgPrice] = useState("13000");
   const [savingProduct, setSavingProduct] = useState(false);
@@ -86,6 +83,7 @@ export default function AdminCatalogScreen() {
         name: prodName.trim(),
         category: prodCategory.trim(),
         description: prodDesc.trim() || undefined,
+        imageUrl: prodImageUrl.trim() || undefined,
         variants: [
           { name: "Regular", price: regPrice },
           { name: "Large", price: lrgPrice },
@@ -94,6 +92,7 @@ export default function AdminCatalogScreen() {
       setShowAddProductModal(false);
       setProdName("");
       setProdDesc("");
+      setProdImageUrl("");
       setSuccessMsg("Produk dan harga baru berhasil ditambahkan untuk seluruh outlet.");
       await loadCatalog();
     } catch (err) {
@@ -123,37 +122,26 @@ export default function AdminCatalogScreen() {
   };
 
   return (
-    <ScreenFrame>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerTextCol}>
-            <Text style={styles.eyebrow}>Seroo Pusat · Brand Owner</Text>
-            <Text style={styles.title}>Manajemen Menu & Harga Brand</Text>
-            <Text style={styles.subtitle}>
-              {user?.name} · Pengaturan menu dan harga berlaku terpusat untuk seluruh outlet.
-            </Text>
-          </View>
-          <View style={styles.headerBtnCol}>
-            <PrimaryButton
-              label="Manajemen Akun"
-              secondary
-              onPress={() => router.push(ROUTES.adminAccounts)}
-            />
-            <ProfileButton />
-            <PrimaryButton
-              label="+ Tambah Menu Baru"
-              onPress={() => {
-                setError(null);
-                setSuccessMsg(null);
-                setShowAddProductModal(true);
-              }}
-            />
-            <LogoutButton />
-          </View>
+    <AppShell
+      navRole="ownerPusat"
+      active="menu"
+      title="Manajemen Menu & Harga Brand"
+      subtitle="Pengaturan menu dan harga berlaku terpusat untuk seluruh outlet."
+      roleLabel="OWNER PUSAT"
+      outletLabel="AKSES GLOBAL"
+      scopeLabel="AKSES GLOBAL"
+    >
+      <View style={styles.container}>
+        <View style={styles.toolbar}>
+          <Text style={styles.sectionTitle}>Katalog Brand</Text>
+          <PrimaryButton
+            label="+ Tambah Menu Baru"
+            onPress={() => {
+              setError(null);
+              setSuccessMsg(null);
+              setShowAddProductModal(true);
+            }}
+          />
         </View>
 
         {/* Brand Control Notice Banner */}
@@ -190,6 +178,13 @@ export default function AdminCatalogScreen() {
                   {catalog.products.map((product) => (
                     <View key={product.id} style={styles.productCard}>
                       <View style={styles.cardHeader}>
+                        {product.imageUrl ? (
+                          <Image
+                            source={{ uri: product.imageUrl }}
+                            style={styles.productThumbnail}
+                            resizeMode="cover"
+                          />
+                        ) : null}
                         <View style={{ flex: 1 }}>
                           <Text style={styles.productName}>{product.name}</Text>
                           <Text style={styles.categoryBadge}>{product.category || "Minuman"}</Text>
@@ -286,6 +281,16 @@ export default function AdminCatalogScreen() {
                 onChangeText={setProdDesc}
               />
 
+              <Text style={styles.fieldLabel}>URL Gambar / Foto Menu (Opsional)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Contoh: https://.../kopi.jpg"
+                value={prodImageUrl}
+                onChangeText={setProdImageUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
               <View style={styles.priceRow}>
                 <View style={{ flex: 1, marginRight: spacing.sm }}>
                   <Text style={styles.fieldLabel}>Harga Regular (Rp) *</Text>
@@ -360,72 +365,45 @@ export default function AdminCatalogScreen() {
             </View>
           </View>
         </Modal>
-      </ScrollView>
-    </ScreenFrame>
+      </View>
+    </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: spacing.md,
-    gap: spacing.md,
+    gap: spacing.lg,
   },
-  header: {
+  toolbar: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: spacing.sm,
-  },
-  headerTextCol: {
-    flex: 1,
-    minWidth: 260,
-  },
-  headerBtnCol: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-    gap: spacing.sm,
     alignItems: "center",
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.primary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginTop: 2,
+    gap: spacing.sm,
   },
   brandBanner: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#EFF6FF",
+    backgroundColor: colors.light.surfaceMuted,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
-    borderRadius: 8,
-    padding: spacing.md,
-    gap: spacing.sm,
+    borderColor: colors.light.border,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   brandIcon: {
-    fontSize: 24,
+    fontSize: 22,
   },
   brandTitle: {
+    ...typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
     fontSize: 14,
-    fontWeight: "700",
-    color: "#1E40AF",
+    color: colors.light.maroon,
   },
   brandSubtitle: {
+    ...typography.fontFamily.regular,
     fontSize: 12,
-    color: "#1E3A8A",
+    color: colors.light.textPrimary,
     marginTop: 2,
     lineHeight: 18,
   },
@@ -435,25 +413,26 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   loadingText: {
-    color: colors.textMuted,
+    color: colors.light.textSecondary,
     fontSize: 14,
   },
   section: {
     gap: spacing.sm,
   },
   sectionTitle: {
+    ...typography.fontFamily.display,
     fontSize: 18,
-    fontWeight: "700",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   emptyCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     padding: spacing.lg,
-    borderRadius: 8,
+    borderRadius: radii.lg,
     alignItems: "center",
   },
   emptyText: {
-    color: colors.textMuted,
+    ...typography.fontFamily.regular,
+    color: colors.light.textSecondary,
   },
   grid: {
     flexDirection: "row",
@@ -467,11 +446,11 @@ const styles = StyleSheet.create({
   productCard: {
     flex: 1,
     minWidth: 300,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    padding: spacing.md,
+    borderColor: colors.light.border,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     gap: spacing.sm,
   },
   cardHeader: {
@@ -479,24 +458,34 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
+  productThumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginRight: spacing.sm,
+    backgroundColor: "#F3F4F6",
+  },
   productName: {
+    ...typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
     fontSize: 16,
-    fontWeight: "700",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   categoryBadge: {
-    fontSize: 11,
-    color: colors.textMuted,
+    ...typography.fontFamily.regular,
+    fontSize: 12,
+    color: colors.light.textSecondary,
     marginTop: 2,
   },
   descText: {
+    ...typography.fontFamily.regular,
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.light.textSecondary,
   },
   variantsLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
     marginTop: spacing.xs,
   },
   variantList: {
@@ -506,16 +495,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F9FAFB",
+    backgroundColor: colors.light.surfaceSecondary,
     padding: spacing.xs,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.light.border,
   },
   variantName: {
     fontSize: 13,
     fontWeight: "600",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   variantPrice: {
     fontSize: 12,
@@ -523,7 +512,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   editPriceBtn: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     borderWidth: 1,
     borderColor: colors.primary,
     paddingHorizontal: spacing.sm,
@@ -551,7 +540,7 @@ const styles = StyleSheet.create({
   recipeBtnText: {
     fontSize: 11,
     fontWeight: "600",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   recipeItemList: {
     gap: 6,
@@ -562,16 +551,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F9FAFB",
+    backgroundColor: colors.light.surfaceSecondary,
     padding: spacing.xs,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.light.border,
   },
   recipeItemName: {
     fontSize: 13,
     fontWeight: "600",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   recipeItemQty: {
     fontSize: 12,
@@ -590,18 +579,18 @@ const styles = StyleSheet.create({
     color: colors.danger ?? "#B91C1C",
   },
   addRecipeBox: {
-    backgroundColor: "#F9FAFB",
+    backgroundColor: colors.light.surfaceSecondary,
     padding: spacing.sm,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.light.border,
     gap: 4,
     marginTop: 4,
   },
   addRecipeBoxTitle: {
     fontSize: 12,
     fontWeight: "700",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
     marginBottom: 4,
   },
   ingredientPill: {
@@ -609,17 +598,17 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surface,
     marginRight: 6,
   },
   ingredientPillActive: {
     borderColor: colors.primary,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: colors.light.surfaceMuted,
   },
   ingredientPillText: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: colors.light.textSecondary,
   },
   ingredientPillTextActive: {
     color: colors.primary,
@@ -633,14 +622,14 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   addIngredientBtnText: {
-    color: colors.surface,
+    color: colors.light.surface,
     fontSize: 13,
     fontWeight: "700",
   },
   addOnBox: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.light.border,
     borderRadius: 8,
     padding: spacing.md,
     gap: spacing.sm,
@@ -650,12 +639,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: spacing.xs,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.light.border,
   },
   addOnName: {
     fontSize: 14,
     fontWeight: "600",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   addOnPrice: {
     fontSize: 14,
@@ -672,7 +661,7 @@ const styles = StyleSheet.create({
   modalBox: {
     width: "100%",
     maxWidth: 480,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     borderRadius: 12,
     padding: spacing.lg,
     gap: spacing.sm,
@@ -680,26 +669,26 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "800",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   modalSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: colors.light.textSecondary,
     marginBottom: spacing.xs,
   },
   fieldLabel: {
     fontSize: 12,
     fontWeight: "700",
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
     marginTop: 4,
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.light.border,
     borderRadius: 6,
     padding: spacing.sm,
     fontSize: 14,
-    color: colors.textPrimary,
+    color: colors.light.textPrimary,
   },
   priceRow: {
     flexDirection: "row",

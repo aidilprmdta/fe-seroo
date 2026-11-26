@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { router } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -13,14 +12,11 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
-import { ROUTES } from "../../src/auth/routePolicy";
-import LogoutButton from "../../src/components/LogoutButton";
 import Notice from "../../src/components/Notice";
 import PrimaryButton from "../../src/components/PrimaryButton";
-import ProfileButton from "../../src/components/ProfileButton";
-import ScreenFrame from "../../src/components/ScreenFrame";
+import AppShell from "../../src/components/AppShell";
 import { createAdminAccountApi } from "../../src/accounts/api";
-import { colors, spacing } from "../../src/theme/tokens";
+import { colors, spacing, typography, radii } from "../../src/theme/tokens";
 
 const PAGE_SIZE = 50;
 const ACCOUNT_ROLES = [
@@ -251,30 +247,16 @@ export default function AdminAccountsScreen() {
   const canCreate = outlets.length > 0;
 
   return (
-    <ScreenFrame>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>Seroo Pusat · Admin Pusat</Text>
-            <Text style={styles.title}>Manajemen Akun</Text>
-            <Text style={styles.subtitle}>
-              {user?.name} · Buat dan kelola akses akun untuk outlet.
-            </Text>
-          </View>
-          <View style={styles.headerActions}>
-            <PrimaryButton
-              label="Kembali ke katalog"
-              secondary
-              onPress={() => router.replace(ROUTES.adminCatalog)}
-            />
-            <ProfileButton />
-            <LogoutButton />
-          </View>
-        </View>
-
+    <AppShell
+      navRole="ownerPusat"
+      active="akun"
+      title="Manajemen Akun"
+      subtitle="Buat dan kelola akses akun untuk outlet."
+      roleLabel="OWNER PUSAT"
+      outletLabel="AKSES GLOBAL"
+      scopeLabel="AKSES GLOBAL"
+    >
+      <View style={styles.container}>
         <View style={styles.toolbar}>
           <Text style={styles.sectionTitle}>Daftar Akun</Text>
           <PrimaryButton
@@ -388,7 +370,7 @@ export default function AdminAccountsScreen() {
             />
           </View>
         ) : null}
-      </ScrollView>
+      </View>
 
       <Modal
         visible={showCreateForm}
@@ -561,7 +543,7 @@ export default function AdminAccountsScreen() {
           </View>
         </View>
       </Modal>
-    </ScreenFrame>
+    </AppShell>
   );
 }
 
@@ -570,42 +552,12 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 1120,
     alignSelf: "center",
-    padding: spacing.md,
     gap: spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: spacing.md,
-  },
-  headerCopy: {
-    flex: 1,
-    minWidth: 260,
-    gap: spacing.xs,
-  },
-  headerActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  eyebrow: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
   },
   title: {
-    color: colors.textPrimary,
-    fontSize: 26,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: colors.textSecondary,
-    fontSize: 15,
+    ...typography.fontFamily.display,
+    color: colors.light.textPrimary,
+    fontSize: 18,
   },
   toolbar: {
     flexDirection: "row",
@@ -615,9 +567,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   sectionTitle: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "700",
+    ...typography.fontFamily.display,
+    color: colors.light.textPrimary,
+    fontSize: 18,
   },
   loading: {
     minHeight: 180,
@@ -631,10 +583,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   emptyCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
+    borderColor: colors.light.border,
+    borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.xs,
   },
@@ -650,11 +602,11 @@ const styles = StyleSheet.create({
   accountCard: {
     flex: 1,
     minWidth: 320,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.light.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: spacing.md,
+    borderColor: colors.light.border,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     gap: spacing.sm,
   },
   accountHeading: {

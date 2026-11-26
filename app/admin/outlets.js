@@ -1,6 +1,6 @@
 // AdminOutletsScreen — Admin Pusat: buat & kelola outlet
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { createAdminApi } from '../../src/api/admin';
 import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
 import { useAuth } from '../../src/auth/AuthContext';
@@ -11,7 +11,6 @@ import Input from '../../src/components/Input';
 import BaseButton from '../../src/components/BaseButton';
 import Badge from '../../src/components/Badge';
 import EmptyState from '../../src/components/EmptyState';
-import ScreenFrame from '../../src/components/ScreenFrame';
 import AppShell from '../../src/components/AppShell';
 import Notice from '../../src/components/Notice';
 import Modal from '../../src/components/Modal';
@@ -88,11 +87,10 @@ export default function AdminOutletsScreen() {
       roleLabel="OWNER PUSAT"
       outletLabel="AKSES GLOBAL"
       scopeLabel="AKSES GLOBAL"
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={loadOutlets} />}
       contentStyle={[styles.container, { padding: r.padding, gap: r.gap }]}
     >
-      <ScrollView
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadOutlets} />}
-      >
+      <>
         {error && <Notice message={error} type="error" />}
 
         <BaseButton label="Tambah Outlet" onPress={() => { setForm(EMPTY_FORM); setError(null); setModalVisible(true); }} fullWidth size="lg" />
@@ -123,7 +121,7 @@ export default function AdminOutletsScreen() {
             </Card>
           ))
         )}
-      </ScrollView>
+      </>
 
       <Modal
         visible={modalVisible}

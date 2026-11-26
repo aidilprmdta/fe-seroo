@@ -1,6 +1,6 @@
 // AppShell — navigasi & header sesuai Figma: bottom nav (HP) / sidebar (Tablet)
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import ScreenFrame from './ScreenFrame';
 import AccountActions from './AccountActions';
@@ -100,15 +100,22 @@ export default function AppShell({
   roleLabel,
   outletLabel = 'Outlet',
   scopeLabel,
+  refreshControl,
   children,
   contentStyle,
 }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { selection, apiRequest } = useAuth();
+  const { selection, apiRequest, logout } = useAuth();
   const outletId = selection?.activeOutletId;
-  const isTablet = width >= 600;
+  const isTablet = width >= 768;
   const items = NAV[navRole]?.[isTablet ? 'tablet' : 'phone'] || [];
+  const roleInitials = (roleLabel || navRole || 'SR')
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
   const [unreadCount, setUnreadCount] = useState(0);
 
   const loadUnread = useCallback(async () => {
@@ -142,6 +149,13 @@ export default function AppShell({
     </TouchableOpacity>
   );
 
+  const handleLogout = () => {
+    Alert.alert('Keluar dari Seroo?', 'Anda akan diminta login kembali.', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Keluar', style: 'destructive', onPress: () => logout() },
+    ]);
+  };
+
   const renderNavItem = (item, tablet = false) => {
     const isActive = item.key === active;
     if (tablet) {
@@ -152,7 +166,7 @@ export default function AppShell({
           onPress={() => router.push(item.route)}
         >
           <View style={[styles.navDot, isActive && styles.navDotActive]} />
-          <Text style={[styles.tabletNavText, isActive && styles.navTextActive]}>
+          <Text style={[styles.tabletNavText, isActive && styles.tabletNavTextActive]}>
             {item.label}
           </Text>
         </TouchableOpacity>
@@ -174,11 +188,16 @@ export default function AppShell({
     <ScreenFrame>
       {isTablet ? (
         <View style={styles.tabletRow}>
-          <View style={[styles.sidebar, { width: Math.min(222, width * 0.2) }]}>
-            <Text style={styles.tabletWordmark}>seroo</Text>
-            <Text style={styles.tabletRole}>{roleLabel || navRole?.toUpperCase()}</Text>
+          <View style={[styles.sidebar, { width: Math.min(240, width * 0.2) }]}>
+            <View style={styles.tabletSidebarHeader}>
+              <Text style={styles.tabletWordmark}>Seroo.</Text>
+              <Text style={styles.tabletRole}>{roleLabel || navRole?.toUpperCase()}</Text>
+            </View>
 
-            <View style={styles.tabletNav}>{items.map((item) => renderNavItem(item, true))}</View>
+            <View style={styles.tabletNav}>
+              <Text style={styles.tabletNavSection}>MENU UTAMA</Text>
+              {items.map((item) => renderNavItem(item, true))}
+            </View>
 
             <View style={styles.sidebarProfile}>
               <View style={styles.avatar}>
@@ -190,6 +209,15 @@ export default function AppShell({
                 <Text style={styles.profileName}>{roleLabel || 'Seroo'}</Text>
                 <Text style={styles.profileOutlet}>{outletLabel}</Text>
               </View>
+            </View>
+            <View style={styles.sidebarFooter}>
+              <TouchableOpacity onPress={() => router.push('/profile')}>
+                <Text style={styles.sidebarFooterLink}>Akun</Text>
+              </TouchableOpacity>
+              <Text style={styles.sidebarFooterDot}>·</Text>
+              <TouchableOpacity onPress={handleLogout}>
+                <Text style={styles.sidebarFooterLink}>Keluar</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -208,6 +236,7 @@ export default function AppShell({
               style={styles.tabletScroll}
               contentContainerStyle={[styles.tabletContent, contentStyle]}
               showsVerticalScrollIndicator={false}
+              refreshControl={refreshControl}
             >
               <Text style={styles.tabletTitle}>{title}</Text>
               {subtitle ? <Text style={styles.tabletSubtitle}>{subtitle}</Text> : null}
@@ -223,16 +252,31 @@ export default function AppShell({
             style={styles.phoneScroll}
             contentContainerStyle={[styles.phoneContent, contentStyle]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={refreshControl}
           >
             <View style={styles.phoneHeader}>
-              <View style={{ flex: 1 }}>
+              <View style={styles.phoneBrand}>
+                <Text style={styles.phoneBrandTop}>Teh Tarik</Text>
                 <Text style={styles.phoneWordmark}>Seroo.</Text>
+                <Text style={styles.phoneAuthentic}>AUTHENTIC</Text>
                 <Text style={styles.phoneRole}>{roleLabel || navRole?.toUpperCase()}</Text>
               </View>
-              <View style={styles.phoneScope}>
-                <Text style={styles.phoneScopeText}>{scopeLabel || outletLabel}</Text>
+              <View style={styles.phoneHeaderActions}>
+                {renderBell()}
+                <View style={styles.phoneScope}>
+                  <Text style={styles.phoneScopeText} numberOfLines={1}>
+                    {scopeLabel || outletLabel}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.phoneAvatar}
+                  onPress={() => router.push('/profile')}
+                  accessibilityLabel="Buka profil"
+                >
+                  <Text style={styles.phoneAvatarText}>{roleInitials}</Text>
+                </TouchableOpacity>
               </View>
-              {renderBell()}
             </View>
 
             <Text style={styles.phoneTitle}>{title}</Text>
@@ -284,9 +328,40 @@ const styles = StyleSheet.create({
   phoneScroll: { flex: 1 },
   phoneContent: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: 90 },
   phoneHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
+  phoneBrand: { flex: 1 },
+  phoneBrandTop: {
+    ...typography.fontFamily.displayItalic,
+    fontSize: 11,
+    color: colors.light.primary,
+  },
   phoneWordmark: {
     ...typography.fontFamily.display,
-    fontSize: 25,
+    fontSize: 24,
+    lineHeight: 26,
+    color: colors.light.primary,
+  },
+  phoneAuthentic: {
+    ...typography.fontFamily.regular,
+    fontSize: 6,
+    letterSpacing: 1.6,
+    color: colors.light.textSecondary,
+    marginTop: 1,
+  },
+  phoneHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  phoneAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.light.surface,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneAvatarText: {
+    ...typography.fontFamily.bold,
+    fontWeight: typography.weights.bold,
+    fontSize: 10,
     color: colors.light.primary,
   },
   phoneRole: {
@@ -302,6 +377,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     maxWidth: 130,
+    flexShrink: 1,
   },
   phoneScopeText: {
     ...typography.fontFamily.semibold,
@@ -318,7 +394,8 @@ const styles = StyleSheet.create({
   },
   phoneSubtitle: {
     ...typography.fontFamily.regular,
-    fontSize: 10,
+    fontSize: 12,
+    lineHeight: 18,
     color: colors.light.textSecondary,
     marginBottom: spacing.lg,
   },
@@ -361,9 +438,12 @@ const styles = StyleSheet.create({
 
   tabletRow: { flex: 1, flexDirection: 'row', backgroundColor: colors.light.background },
   sidebar: {
-    backgroundColor: colors.light.surface,
+    backgroundColor: colors.light.maroon,
     borderRightWidth: 1,
-    borderRightColor: colors.light.border,
+    borderRightColor: 'rgba(255,255,255,0.12)',
+  },
+  tabletSidebarHeader: {
+    backgroundColor: colors.light.surface,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
@@ -379,10 +459,18 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     fontSize: 10,
     color: colors.light.textSecondary,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xl,
+    marginTop: spacing.xs,
   },
-  tabletNav: { gap: spacing.xs },
+  tabletNav: { flex: 1, gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.lg },
+  tabletNavSection: {
+    ...typography.fontFamily.bold,
+    fontWeight: typography.weights.bold,
+    fontSize: 9,
+    letterSpacing: 1,
+    color: colors.light.goldBorder,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+  },
   tabletNavItem: {
     height: 42,
     borderRadius: radii.md,
@@ -391,30 +479,32 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingHorizontal: spacing.md,
   },
-  tabletNavActive: { backgroundColor: colors.light.surfaceMuted },
-  navDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.light.border },
-  navDotActive: { backgroundColor: colors.light.primary },
+  tabletNavActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  navDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'rgba(255,255,255,0.35)' },
+  navDotActive: { backgroundColor: colors.light.goldBorder },
   tabletNavText: {
     ...typography.fontFamily.medium,
     fontSize: 13,
-    color: colors.light.textPrimary,
+    color: colors.light.surface,
   },
+  tabletNavTextActive: { color: colors.light.goldBorder },
   sidebarProfile: {
-    marginTop: 'auto',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.light.background,
+    backgroundColor: 'rgba(0,0,0,0.16)',
     borderWidth: 1,
-    borderColor: colors.light.border,
+    borderColor: 'rgba(255,255,255,0.2)',
     borderRadius: radii.md,
     padding: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
   },
   avatar: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: colors.light.surfaceMuted,
+    backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -422,18 +512,35 @@ const styles = StyleSheet.create({
     ...typography.fontFamily.bold,
     fontWeight: typography.weights.bold,
     fontSize: 12,
-    color: colors.light.primary,
+    color: colors.light.surface,
   },
   profileName: {
     ...typography.fontFamily.semibold,
     fontWeight: typography.weights.semibold,
     fontSize: 12,
-    color: colors.light.textPrimary,
+    color: colors.light.surface,
   },
   profileOutlet: {
     ...typography.fontFamily.regular,
     fontSize: 10,
-    color: colors.light.textSecondary,
+    color: colors.light.goldBorder,
+  },
+  sidebarFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  sidebarFooterLink: {
+    ...typography.fontFamily.semibold,
+    fontWeight: typography.weights.semibold,
+    fontSize: 11,
+    color: colors.light.goldBorder,
+  },
+  sidebarFooterDot: {
+    fontSize: 11,
+    color: colors.light.goldBorder,
   },
   tabletMain: { flex: 1 },
   topbar: {

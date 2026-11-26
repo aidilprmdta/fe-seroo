@@ -29,6 +29,7 @@ const ANONYMOUS_STATE = {
   selection: null,
   error: null,
   notice: null,
+  authenticatedAt: null,
 };
 
 function stateForProfile(profile) {
@@ -39,6 +40,7 @@ function stateForProfile(profile) {
     selection: getInitialOutletContext(profile.user.memberships),
     error: null,
     notice: null,
+    authenticatedAt: Date.now(),
   };
 }
 

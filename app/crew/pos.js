@@ -1,6 +1,6 @@
 // CrewPOSScreen — POS lengkap: katalog + add-on + keranjang + pembayaran + kirim order
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert, AppState } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert, AppState, Image } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as Network from 'expo-network';
 import { useAuth } from '../../src/auth/AuthContext';
@@ -641,6 +641,13 @@ export default function CrewPOSScreen() {
       <View style={styles.productGrid}>
       {catalog?.data?.products?.map((product) => (
         <Card key={product.id} style={styles.productCard}>
+          {product.imageUrl ? (
+            <Image
+              source={{ uri: product.imageUrl }}
+              style={styles.posProductImage}
+              resizeMode="cover"
+            />
+          ) : null}
           <Text style={styles.productTitle}>{product.name}</Text>
           {product.variants?.map((variant) => (
             <TouchableOpacity
@@ -857,6 +864,13 @@ const styles = StyleSheet.create({
   cartTotalValue: { ...typography.fontFamily.medium, ...typography.weights.semibold, fontSize: typography.sizes.lg, color: colors.light.textPrimary },
   productGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   productCard: { flex: 1, minWidth: 150, marginTop: spacing.sm, padding: spacing.sm },
+  posProductImage: {
+    width: '100%',
+    height: 90,
+    borderRadius: radii.sm,
+    marginBottom: spacing.xs,
+    backgroundColor: colors.light.surfaceSecondary,
+  },
   productTitle: { ...typography.fontFamily.semibold, ...typography.weights.semibold, fontSize: 9.2, color: colors.light.textPrimary, marginBottom: spacing.sm },
   variantRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, padding: spacing.sm, borderRadius: radii.sm, backgroundColor: colors.light.surfaceSecondary },
   variantName: { ...typography.fontFamily.regular, fontSize: 9, color: colors.light.textSecondary, flex: 1 },
