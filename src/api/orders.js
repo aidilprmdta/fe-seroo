@@ -24,5 +24,12 @@ export function createOrdersApi({ request }) {
       const data = await request.post(`/outlets/${outletId}/orders/${orderId}/cancel`, cancelData);
       return data;
     },
+    async cancelItem(outletId, orderId, itemId, payload) {
+      const data = await request.post(
+        `/outlets/${outletId}/orders/${orderId}/items/${itemId}/cancel`,
+        payload,
+      );
+      return data;
+    },
   };
 }

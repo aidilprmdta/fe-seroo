@@ -27,7 +27,7 @@ export default function CrewShopeeFoodScreen() {
   const [form, setForm] = useState({
     platformOrderNumber: '',
     quantity: '',
-    paymentMethod: 'CASH',
+    paymentMethod: 'SHOPEEFOOD_IN_APP',
   });
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [saved, setSaved] = useState(false);
@@ -90,7 +90,7 @@ export default function CrewShopeeFoodScreen() {
       });
       setSaved(true);
       Alert.alert('Berhasil', 'Pesanan ShopeeFood berhasil disimpan sebagai pesanan POS berlabel ShopeeFood.');
-      setForm({ platformOrderNumber: '', quantity: '', paymentMethod: 'CASH' });
+      setForm({ platformOrderNumber: '', quantity: '', paymentMethod: 'SHOPEEFOOD_IN_APP' });
       setSelectedVariant(null);
     } catch (err) {
       setError(err?.message || 'Pesanan ShopeeFood gagal disimpan.');
@@ -170,7 +170,9 @@ export default function CrewShopeeFoodScreen() {
 
               <Text style={styles.sectionTitle}>Metode pembayaran</Text>
               {[
-                { key: 'CASH', label: 'Cash / COD (diterima di outlet)' },
+                { key: 'SHOPEEFOOD_IN_APP', label: 'ShopeeFood In-App (settlement platform)' },
+                { key: 'SHOPEEFOOD_COD', label: 'ShopeeFood COD (dibayar ke driver)' },
+                { key: 'CASH', label: 'Cash di outlet' },
                 { key: 'QRIS', label: 'QRIS (menunggu verifikasi kasir)' },
               ].map((method) => (
                 <TouchableOpacity

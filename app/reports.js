@@ -213,6 +213,14 @@ export default function ReportsScreen() {
                 <Text style={styles.tableItem}>QRIS menunggu</Text>
                 <Text style={styles.tableItem}>Rp {formatRupiah(payment.qris?.pendingReconciliation?.total)}</Text>
               </View>
+              <View style={styles.tableRow}>
+                <Text style={styles.tableItem}>ShopeeFood In-App ({payment.shopeeFood?.inApp?.count ?? 0} trx)</Text>
+                <Text style={styles.tableItem}>Rp {formatRupiah(payment.shopeeFood?.inApp?.total)}</Text>
+              </View>
+              <View style={styles.tableRow}>
+                <Text style={styles.tableItem}>ShopeeFood COD ({payment.shopeeFood?.cod?.count ?? 0} trx)</Text>
+                <Text style={styles.tableItem}>Rp {formatRupiah(payment.shopeeFood?.cod?.total)}</Text>
+              </View>
             </Card>
 
             <Text style={styles.sectionTitle}>Penjualan Produk</Text>

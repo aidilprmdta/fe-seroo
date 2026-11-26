@@ -134,6 +134,8 @@ export default function ManagerShiftHandoverScreen() {
                 <Text style={styles.requestTitle}>{item.crewName || 'Crew'}</Text>
                 <Text style={styles.hint}>
                   {item.currentOutlet} → {item.nextOutlet}
+                  {item.summary ? ` · ${item.summary}` : ''}
+                  {item.cashHandover ? ` · Kas: ${item.cashHandover}` : ''}
                   {item.notes ? ` · ${item.notes}` : ''}
                 </Text>
               </TouchableOpacity>

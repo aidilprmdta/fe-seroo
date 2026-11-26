@@ -29,6 +29,11 @@ export default function CrewTransactionDetailScreen({ route }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [cancelItemTarget, setCancelItemTarget] = useState(null);
+  const [cancelItemReason, setCancelItemReason] = useState('');
+  const [savingCancel, setSavingCancel] = useState(false);
+
+  const canCancelItems = order?.paymentStatus !== 'LUNAS' && order?.status === 'COMPLETED';
 
   const getApi = useCallback(() => {
     return createOrdersApi({ request: createApiRequestWrapper(apiRequest) });
@@ -51,6 +56,28 @@ export default function CrewTransactionDetailScreen({ route }) {
   useEffect(() => {
     loadOrder();
   }, [loadOrder]);
+
+  const handleCancelItem = useCallback(async () => {
+    if (!cancelItemTarget) return;
+    if (cancelItemReason.trim().length < 5) {
+      setError('Alasan pembatalan item wajib diisi (minimal 5 karakter).');
+      return;
+    }
+    try {
+      setSavingCancel(true);
+      await getApi().cancelItem(outletId, orderId, cancelItemTarget.id, {
+        reason: cancelItemReason.trim(),
+      });
+      setCancelItemTarget(null);
+      setCancelItemReason('');
+      await loadOrder();
+      Alert.alert('Berhasil', 'Item berhasil dibatalkan dan total transaksi diperbarui.');
+    } catch (err) {
+      setError(err?.message || 'Pembatalan item gagal.');
+    } finally {
+      setSavingCancel(false);
+    }
+  }, [cancelItemTarget, cancelItemReason, getApi, outletId, orderId, loadOrder]);
 
   if (!orderId) {
     return (
@@ -150,14 +177,53 @@ export default function CrewTransactionDetailScreen({ route }) {
         <Card style={styles.itemsCard}>
           <Text style={styles.sectionTitle}>Item pesanan</Text>
           {order.items.map((item, idx) => (
-            <View key={idx} style={styles.itemRow}>
+            <View key={item.id || idx} style={styles.itemRow}>
               <Text style={styles.itemName}>{item.productName}</Text>
               <Text style={styles.itemMeta}>
                 x {item.quantity} · {item.variantName || '—'}
+                {item.cancelledAt ? ' · DIBATALKAN' : ''}
               </Text>
               <Text style={styles.itemPrice}>Rp {formatRupiah(item.unitPrice || 0)}</Text>
+              {canCancelItems && !item.cancelledAt && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setCancelItemTarget(item);
+                    setCancelItemReason('');
+                    setError(null);
+                  }}
+                >
+                  <Text style={styles.cancelItemText}>Batalkan item</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
+
+          {cancelItemTarget && (
+            <View style={styles.cancelPanel}>
+              <Text style={styles.sectionTitle}>
+                Batalkan: {cancelItemTarget.productName} ({cancelItemTarget.variantName})
+              </Text>
+              <Input
+                label="Alasan pembatalan"
+                value={cancelItemReason}
+                onChangeText={setCancelItemReason}
+                placeholder="Contoh: salah input jumlah"
+              />
+              <View style={styles.cancelActions}>
+                <BaseButton
+                  label="Batal"
+                  variant="secondary"
+                  onPress={() => setCancelItemTarget(null)}
+                />
+                <BaseButton
+                  label="Konfirmasi batal item"
+                  onPress={handleCancelItem}
+                  loading={savingCancel}
+                  disabled={savingCancel}
+                />
+              </View>
+            </View>
+          )}
         </Card>
       )}
 
@@ -214,6 +280,21 @@ const styles = StyleSheet.create({
   itemsCard: {
     gap: spacing.sm,
     marginBottom: spacing.lg,
+  },
+  cancelItemText: {
+    ...typography.fontFamily.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.danger,
+  },
+  cancelPanel: {
+    gap: spacing.sm,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.light.border,
+  },
+  cancelActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   sectionTitle: {
     ...typography.fontFamily.medium,

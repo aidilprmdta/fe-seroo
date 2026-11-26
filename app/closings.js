@@ -164,6 +164,41 @@ export default function ClosingsScreen() {
     setError(null);
   }, []);
 
+  const [cashReviewTarget, setCashReviewTarget] = useState(null);
+  const [cashReviewNote, setCashReviewNote] = useState('');
+  const [savingCashReview, setSavingCashReview] = useState(false);
+
+  const handleCashReview = useCallback(
+    async (status) => {
+      if (!cashReviewTarget) return;
+      setError(null);
+      setSavingCashReview(true);
+      try {
+        const closingsApi = createClosingsApi({ request: createApiRequestWrapper(apiRequest) });
+        await closingsApi.updateCashDifference(outletId, cashReviewTarget.id, {
+          status,
+          note: cashReviewNote.trim() || undefined,
+        });
+        Alert.alert('Berhasil', 'Status investigasi selisih kas diperbarui.');
+        setCashReviewTarget(null);
+        setCashReviewNote('');
+        loadClosings();
+      } catch (err) {
+        setError(err?.message || 'Status selisih kas gagal diperbarui.');
+      } finally {
+        setSavingCashReview(false);
+      }
+    },
+    [cashReviewTarget, cashReviewNote, outletId, loadClosings],
+  );
+
+  const CASH_STATUS_LABEL = {
+    BELUM_DIPERIKSA: 'Belum diperiksa',
+    SEDANG_DIPERIKSA: 'Sedang diperiksa',
+    SUDAH_DIKETAHUI: 'Sudah diketahui',
+    BELUM_TERSELESAIKAN: 'Belum terselesaikan',
+  };
+
   const handleReopen = useCallback(async () => {
     setError(null);
     if (reopenReason.trim().length < 5) {
@@ -364,14 +399,28 @@ export default function ClosingsScreen() {
           closings.map(c => (
             <ListItem
               key={c.id}
-              title={`Closing ${c.type} ${c.periodKey}`}
-              subtitle={`Status: ${c.status} · ${formatDisplayDate(c.closedAt || c.createdAt)}`}
+              title={`Closing ${c.closingType || c.type || ''} ${c.periodKey}`}
+              subtitle={`Status: ${c.status} · ${formatDisplayDate(c.closedAt || c.createdAt)}${
+                c.cashDifference ? ` · Selisih kas: Rp ${formatRupiah(c.cashDifference)} (${CASH_STATUS_LABEL[c.cashDifferenceStatus] || c.cashDifferenceStatus})` : ''
+              }`}
               right={
                 <View style={styles.closingRight}>
                   <Badge
                     label={c.status === 'CLOSED' ? 'Selesai' : 'Dibuka'}
                     variant={c.status === 'CLOSED' ? 'success' : 'info'}
                   />
+                  {canPerformClosing && c.cashDifference && (
+                    <TouchableOpacity
+                      style={styles.reopenBtn}
+                      onPress={() => {
+                        setCashReviewTarget(c);
+                        setCashReviewNote('');
+                        setError(null);
+                      }}
+                    >
+                      <Text style={styles.reopenText}>Periksa selisih</Text>
+                    </TouchableOpacity>
+                  )}
                   {canPerformClosing && c.status === 'CLOSED' && (
                     <TouchableOpacity style={styles.reopenBtn} onPress={() => openReopen(c)}>
                       <Text style={styles.reopenText}>Reopen</Text>
@@ -423,6 +472,36 @@ export default function ClosingsScreen() {
           />
         </View>
       </Modal>
+
+      <Modal
+        visible={!!cashReviewTarget}
+        onClose={() => setCashReviewTarget(null)}
+        title="Investigasi Selisih Kas"
+        subtitle={`Periode ${cashReviewTarget?.periodKey || ''} · Selisih Rp ${formatRupiah(cashReviewTarget?.cashDifference || 0)}`}
+      >
+        <View style={styles.modalContent}>
+          {error && <Notice message={error} type="error" />}
+          <Input
+            label="Catatan investigasi"
+            value={cashReviewNote}
+            onChangeText={setCashReviewNote}
+            placeholder="Hasil pemeriksaan selisih (opsional)"
+          />
+          <View style={styles.cashActionRow}>
+            {['SEDANG_DIPERIKSA', 'SUDAH_DIKETAHUI', 'BELUM_TERSELESAIKAN'].map((status) => (
+              <BaseButton
+                key={status}
+                label={CASH_STATUS_LABEL[status]}
+                onPress={() => handleCashReview(status)}
+                loading={savingCashReview}
+                disabled={savingCashReview}
+                variant={status === 'SUDAH_DIKETAHUI' ? 'primary' : 'secondary'}
+                size="sm"
+              />
+            ))}
+          </View>
+        </View>
+      </Modal>
     </AppShell>
   );
 }
@@ -431,6 +510,12 @@ const styles = StyleSheet.create({
   container: {
     padding: spacing.lg,
     gap: spacing.md,
+  },
+  cashActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
   },
   header: {
     gap: spacing.sm,

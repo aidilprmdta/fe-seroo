@@ -1,9 +1,12 @@
 // AppShell — navigasi & header sesuai Figma: bottom nav (HP) / sidebar (Tablet)
-import React from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import ScreenFrame from './ScreenFrame';
 import AccountActions from './AccountActions';
+import { useAuth } from '../auth/AuthContext';
+import { createApiRequestWrapper } from '../api/api';
+import { createNotificationsApi } from '../notifications/api';
 import { colors, spacing, typography, radii } from '../theme/tokens';
 
 export const NAV = {
@@ -102,8 +105,42 @@ export default function AppShell({
 }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const { selection, apiRequest } = useAuth();
+  const outletId = selection?.activeOutletId;
   const isTablet = width >= 600;
   const items = NAV[navRole]?.[isTablet ? 'tablet' : 'phone'] || [];
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const loadUnread = useCallback(async () => {
+    if (!outletId || !apiRequest) return;
+    try {
+      const api = createNotificationsApi({ request: createApiRequestWrapper(apiRequest) });
+      const data = await api.getNotifications(outletId);
+      setUnreadCount(data.unreadCount ?? 0);
+    } catch {
+      // Badge hanya penambah informasi; gagal memuat tidak perlu mengganggu layar.
+      setUnreadCount(0);
+    }
+  }, [outletId, apiRequest]);
+
+  useEffect(() => {
+    loadUnread();
+  }, [loadUnread]);
+
+  const renderBell = () => (
+    <TouchableOpacity
+      style={styles.bell}
+      onPress={() => router.push('/notifications')}
+      accessibilityLabel={`Notifikasi, ${unreadCount} perlu tindakan`}
+    >
+      <Text style={styles.bellIcon}>🔔</Text>
+      {unreadCount > 0 && (
+        <View style={styles.bellBadge}>
+          <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
 
   const renderNavItem = (item, tablet = false) => {
     const isActive = item.key === active;
@@ -164,6 +201,7 @@ export default function AppShell({
               <View style={styles.outletBadge}>
                 <Text style={styles.outletBadgeText}>{outletLabel}</Text>
               </View>
+              {renderBell()}
             </View>
 
             <ScrollView
@@ -194,6 +232,7 @@ export default function AppShell({
               <View style={styles.phoneScope}>
                 <Text style={styles.phoneScopeText}>{scopeLabel || outletLabel}</Text>
               </View>
+              {renderBell()}
             </View>
 
             <Text style={styles.phoneTitle}>{title}</Text>
@@ -212,6 +251,35 @@ export default function AppShell({
 }
 
 const styles = StyleSheet.create({
+  bell: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.light.surface,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+  },
+  bellIcon: { fontSize: 15 },
+  bellBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    backgroundColor: colors.light.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: {
+    ...typography.fontFamily.bold,
+    fontWeight: typography.weights.bold,
+    fontSize: 8,
+    color: colors.light.surface,
+  },
   phoneRoot: { flex: 1, backgroundColor: colors.light.background },
   phoneScroll: { flex: 1 },
   phoneContent: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: 90 },

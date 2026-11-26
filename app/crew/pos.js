@@ -305,6 +305,10 @@ export default function CrewPOSScreen() {
     const online = await isOnline();
     setOnline(online);
     const payload = { ...orderData, recordedOffline: !online };
+    if (paymentMethod === 'CASH' && paidAmount) {
+      // Backend menghitung kembalian dari uang diterima; dikirim hanya untuk Cash.
+      payload.cashReceived = String(Number(paidAmount));
+    }
 
     if (!online) {
       if (paymentMethod === 'QRIS' || paymentMethod === 'SPLIT') {
@@ -349,7 +353,8 @@ export default function CrewPOSScreen() {
       }
       Alert.alert(
         'Pesanan berhasil dicatat',
-        `Nomor: ${order.orderNumber}\nTotal: Rp ${formatRupiah(order.total)}`,
+        `Nomor: ${order.orderNumber}\nTotal: Rp ${formatRupiah(order.total)}` +
+          (response?.data?.change ? `\nKembalian: Rp ${formatRupiah(response.data.change)}` : ''),
       );
       setCart([]);
       setSelectedAddOns([]);

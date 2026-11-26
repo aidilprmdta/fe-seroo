@@ -87,6 +87,18 @@ export function createClosingApi({ request }) {
       }
       return data;
     },
+
+    async updateCashDifference(outletId, closingId, payload) {
+      const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/closings/${encodeURIComponent(closingId)}/cash-difference`;
+      const data = await request(path, {
+        method: "PATCH",
+        body: payload,
+      });
+      if (!data?.closing || typeof data.closing.cashDifferenceStatus !== "string") {
+        throw invalidResponse();
+      }
+      return data;
+    },
   };
 }
 

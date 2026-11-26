@@ -12,18 +12,8 @@ import BaseButton from '../../src/components/BaseButton';
 import AppShell from '../../src/components/AppShell';
 import Notice from '../../src/components/Notice';
 
-// Backend hanya menyimpan `notes` (max 500), jadi rincian kas & checklist
-// digabung ke sana. shortcut: field terpisah menunggu perubahan schema.
-function buildHandoverNotes({ summary, cashHandover, checklistAgenda, checklistServer, notes }) {
-  const parts = [
-    `Ringkasan: ${summary.trim()}`,
-    `Kas: ${cashHandover.trim()}`,
-    `Agenda: ${checklistAgenda.trim()}`,
-    `Service: ${checklistServer.trim()}`,
-    notes.trim() ? `Catatan: ${notes.trim()}` : null,
-  ].filter(Boolean);
-  return parts.join(' | ').slice(0, 500);
-}
+// Backend menyimpan rincian serah terima pada kolom terpisah sejak migration
+// 20261126100000, jadi tidak perlu digabung ke `notes` lagi.
 
 export default function CrewShiftHandoverScreen() {
   const { user, selection, apiRequest } = useAuth();
@@ -66,7 +56,11 @@ export default function CrewShiftHandoverScreen() {
         crewUserId: user?.id,
         crewName: user?.name,
         handoverAt: new Date().toISOString(),
-        notes: buildHandoverNotes({ summary, cashHandover, checklistAgenda, checklistServer, notes }),
+        summary: summary.trim(),
+        cashHandover: cashHandover.trim(),
+        checklistAgenda: checklistAgenda.trim(),
+        checklistService: checklistServer.trim(),
+        notes: notes.trim() || undefined,
       });
       setSubmitted(true);
       Alert.alert('Berhasil', 'Permintaan serah terima shift berhasil dikirim ke Manager.');
