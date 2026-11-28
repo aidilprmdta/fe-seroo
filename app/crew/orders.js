@@ -70,7 +70,7 @@ export default function CrewOrdersScreen() {
   }, [router]);
 
   const openCancel = useCallback((order) => {
-    router.push('/crew/cancel-request', { params: { id: order.id } });
+    router.push({ pathname: '/crew/cancel-request', params: { id: order.id } });
   }, [router]);
 
   return (

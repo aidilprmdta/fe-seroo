@@ -27,6 +27,7 @@ import Card from '../../src/components/Card';
 import Notice from '../../src/components/Notice';
 import EmptyState from '../../src/components/EmptyState';
 import ScreenFrame from '../../src/components/ScreenFrame';
+import FadeIn from '../../src/components/FadeIn';
 
 export default function ManagerAvailabilityScreen() {
   const { user, selection, apiRequest } = useAuth();
@@ -113,6 +114,7 @@ export default function ManagerAvailabilityScreen() {
 
   return (
     <ScreenFrame>
+      <FadeIn style={styles.screen}>
       <ScrollView
         contentContainerStyle={styles.container}
         contentInsetAdjustmentBehavior="automatic"
@@ -231,11 +233,15 @@ export default function ManagerAvailabilityScreen() {
           </>
         )}
       </ScrollView>
+      </FadeIn>
     </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   container: {
     padding: spacing.md,
     paddingBottom: spacing.xxl,

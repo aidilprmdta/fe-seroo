@@ -2,6 +2,7 @@
 // Figma: 12 · Detail transaksi & pembayaran · Tablet · Prototype
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOrdersApi } from '../../src/api/orders';
 import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
@@ -20,8 +21,8 @@ function formatRupiah(value) {
   return Number(value).toLocaleString('id-ID');
 }
 
-export default function CrewTransactionDetailScreen({ route }) {
-  const { id: orderId } = route.params || {};
+export default function CrewTransactionDetailScreen() {
+  const { id: orderId } = useLocalSearchParams();
   const { selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
 

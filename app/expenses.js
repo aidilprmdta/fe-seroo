@@ -1,6 +1,6 @@
 // ExpensesScreen — pengeluaran: list, create, koreksi, batalkan, audit
-import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Pressable, useWindowDimensions } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { useAuth } from '../src/auth/AuthContext';
 import { createExpensesApi } from '../src/api/expenses';
@@ -30,6 +30,88 @@ function formatRupiah(value) {
   return Number.isFinite(number) ? number.toLocaleString('id-ID') : '0';
 }
 
+const DATE_TIME_FORMAT = new Intl.DateTimeFormat('id-ID', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'Asia/Jakarta',
+});
+
+const MONTH_KEY_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  timeZone: 'Asia/Jakarta',
+});
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  return DATE_TIME_FORMAT.format(new Date(value));
+}
+
+function jakartaMonthKey(value) {
+  return MONTH_KEY_FORMAT.format(new Date(value));
+}
+
+function expenseState(expense) {
+  if (expense.status !== 'ACTIVE') return 'Dibatalkan';
+  const corrected = (expense.audits ?? []).some(
+    (audit) => audit.action === 'CORRECTED',
+  );
+  return corrected ? 'Dikoreksi' : 'Aktif';
+}
+
+const STATE_VARIANT = {
+  Aktif: 'success',
+  Dikoreksi: 'warning',
+  Dibatalkan: 'danger',
+};
+
+const PERIOD_OPTIONS = [
+  { value: 'SEMUA', label: 'Semua' },
+  { value: 'BULAN_INI', label: 'Bulan ini' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'SEMUA', label: 'Semua' },
+  { value: 'Aktif', label: 'Aktif' },
+  { value: 'Dikoreksi', label: 'Dikoreksi' },
+  { value: 'Dibatalkan', label: 'Dibatalkan' },
+];
+
+function FilterChips({ label, options, value, onChange }) {
+  return (
+    <View style={styles.filterGroup}>
+      <Text style={styles.filterLabel}>{label}</Text>
+      <View style={styles.chipWrap}>
+        {options.map((option) => {
+          const active = option.value === value;
+          return (
+            <TouchableOpacity
+              key={option.value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              onPress={() => onChange(option.value)}
+              style={[styles.chip, active && styles.chipActive]}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailRowLabel}>{label}</Text>
+      <Text style={styles.detailRowValue}>{value}</Text>
+    </View>
+  );
+}
+
 function todayKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -47,6 +129,11 @@ export default function ExpensesScreen() {
   const canManageExpenses = activeRole === 'MANAGER';
   const navRole = isOwner ? 'ownerMitra' : 'manager';
   const roleLabel = activeRole || 'MANAGER';
+  const outletLabel =
+    user?.memberships?.find((membership) => membership.outletId === outletId)
+      ?.outletName || 'Outlet';
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 768;
 
   const [expenses, setExpenses] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -63,6 +150,11 @@ export default function ExpensesScreen() {
   const [editForm, setEditForm] = useState({ amount: '', date: '', description: '', reason: '' });
   const [cancelReason, setCancelReason] = useState('');
   const [auditRows, setAuditRows] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [successState, setSuccessState] = useState(null);
+  const [period, setPeriod] = useState('SEMUA');
+  const [filterCategory, setFilterCategory] = useState('SEMUA');
+  const [filterStatus, setFilterStatus] = useState('SEMUA');
 
   const getApi = useCallback(() => {
     return createExpensesApi({ request: createApiRequestWrapper(apiRequest) });
@@ -122,7 +214,11 @@ export default function ExpensesScreen() {
       setDescription('');
       setDate(todayKey());
       await loadExpenses();
-      Alert.alert('Berhasil', 'Pengeluaran berhasil dicatat.');
+      setModal('success');
+      setSuccessState({
+        title: 'Pengeluaran berhasil dicatat',
+        message: 'Catatan masuk ke rekap pengeluaran aktif outlet ini.',
+      });
     } catch (err) {
       setError(err?.message || 'Pengeluaran gagal disimpan.');
     } finally {
@@ -148,6 +244,10 @@ export default function ExpensesScreen() {
       setError('Nominal dan tanggal wajib diisi.');
       return;
     }
+    if (!editForm.reason.trim()) {
+      setError('Alasan koreksi wajib diisi.');
+      return;
+    }
     setSubmitting(true);
     try {
       await getApi().editExpense(outletId, target.id, {
@@ -155,11 +255,14 @@ export default function ExpensesScreen() {
         amount: String(Number(editForm.amount)),
         expenseDate: toIsoDate(editForm.date),
         description: editForm.description.trim(),
-        reason: editForm.reason.trim() || 'Koreksi dari aplikasi mobile',
+        reason: editForm.reason.trim(),
       });
-      setModal(null);
+      setModal('success');
+      setSuccessState({
+        title: 'Koreksi pengeluaran berhasil',
+        message: 'Perubahan nominal dan catatan sudah tercatat di riwayat audit.',
+      });
       await loadExpenses();
-      Alert.alert('Berhasil', 'Pengeluaran berhasil dikoreksi.');
     } catch (err) {
       setError(err?.message || 'Koreksi gagal.');
     } finally {
@@ -176,15 +279,22 @@ export default function ExpensesScreen() {
 
   const handleCancel = useCallback(async () => {
     setError(null);
+    if (!cancelReason.trim()) {
+      setError('Alasan pembatalan wajib diisi.');
+      return;
+    }
     setSubmitting(true);
     try {
       await getApi().cancelExpense(outletId, target.id, {
         clientTransactionId: uuidv4(),
-        reason: cancelReason.trim() || 'Dibatalkan dari aplikasi mobile',
+        reason: cancelReason.trim(),
       });
-      setModal(null);
+      setModal('success');
+      setSuccessState({
+        title: 'Pengeluaran berhasil dibatalkan',
+        message: 'Catatan berstatus dibatalkan dan tidak lagi dihitung pada rekap aktif.',
+      });
       await loadExpenses();
-      Alert.alert('Berhasil', 'Pengeluaran dibatalkan.');
     } catch (err) {
       setError(err?.message || 'Pembatalan gagal.');
     } finally {
@@ -205,6 +315,62 @@ export default function ExpensesScreen() {
     }
   }, [outletId, getApi]);
 
+  const currentMonth = jakartaMonthKey(new Date());
+  const periodScoped = useMemo(
+    () =>
+      expenses.filter(
+        (expense) =>
+          period !== 'BULAN_INI' ||
+          jakartaMonthKey(expense.expenseDate) === currentMonth,
+      ),
+    [expenses, period, currentMonth],
+  );
+
+  const filteredExpenses = useMemo(
+    () =>
+      periodScoped.filter((expense) => {
+        if (
+          filterCategory !== 'SEMUA' &&
+          expense.category?.id !== filterCategory
+        ) {
+          return false;
+        }
+        if (filterStatus !== 'SEMUA' && expenseState(expense) !== filterStatus) {
+          return false;
+        }
+        return true;
+      }),
+    [periodScoped, filterCategory, filterStatus],
+  );
+
+  const summary = useMemo(() => {
+    let total = 0;
+    let corrected = 0;
+    let active = 0;
+    let cancelled = 0;
+    for (const expense of periodScoped) {
+      if (expense.status === 'ACTIVE') {
+        total += Number(expense.amount || 0);
+        active += 1;
+      } else {
+        cancelled += 1;
+      }
+      if (expenseState(expense) === 'Dikoreksi') corrected += 1;
+    }
+    return { total, corrected, active, cancelled };
+  }, [periodScoped]);
+
+  const categoryOptions = useMemo(
+    () => [
+      { value: 'SEMUA', label: 'Semua' },
+      ...categories.map((category) => ({
+        value: category.id,
+        label: category.name,
+      })),
+    ],
+    [categories],
+  );
+
   return (
     <AppShell
       navRole={navRole}
@@ -212,64 +378,141 @@ export default function ExpensesScreen() {
       title="Pengeluaran outlet"
       subtitle={isOwner ? "Memantau riwayat pengeluaran dan jejak audit outlet." : "Catat tanggal kejadian, kategori, dan nominal. Pengeluaran masuk ke rekap."}
       roleLabel={roleLabel}
-      outletLabel={outletId || 'Outlet'}
-      scopeLabel={outletId || 'Outlet'}
+      outletLabel={outletLabel}
+      scopeLabel={outletLabel}
       contentStyle={styles.container}
     >
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadExpenses} />}
       >
-        {error && !modal && <Notice message={error} type="error" />}
+        {error && !modal ? <Notice message={error} type="error" /> : null}
 
-        {canManageExpenses && (
-          <Card style={styles.formCard}>
-            <Text style={styles.sectionTitle}>Catat Pengeluaran</Text>
-            <Text style={styles.label}>Kategori</Text>
-            <View style={styles.chipRow}>
-              {Array.isArray(categories) && categories.length > 0 ? (
-                categories.map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.chip, categoryId === item.id && styles.chipActive]}
-                    onPress={() => setCategoryId(item.id)}
-                  >
-                    <Text style={[styles.chipText, categoryId === item.id && styles.chipTextActive]}>
-                      {item.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <Text style={styles.emptyCategoriesText}>Tidak ada kategori tersedia</Text>
-              )}
+        <View style={styles.summaryGrid}>
+          {[
+            { label: 'Total periode', value: `Rp ${formatRupiah(summary.total)}` },
+            { label: 'Catatan aktif', value: String(summary.active) },
+            { label: 'Dikoreksi', value: String(summary.corrected) },
+            { label: 'Dibatalkan', value: String(summary.cancelled) },
+          ].map((card) => (
+            <View key={card.label} style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>{card.label}</Text>
+              <Text style={styles.summaryValue} numberOfLines={1}>
+                {card.value}
+              </Text>
             </View>
-            <Input label="Jumlah (Rp)" value={amount} onChangeText={setAmount} placeholder="0" keyboardType="numeric" />
-            <Input label="Tanggal" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" keyboardType="numeric" />
-            <Input label="Deskripsi" value={description} onChangeText={setDescription} placeholder="Keterangan pengeluaran" />
-            <BaseButton label="Simpan Pengeluaran" onPress={handleCreate} loading={submitting} fullWidth size="lg" />
-          </Card>
-        )}
+          ))}
+        </View>
 
-        <Text style={styles.sectionTitle}>Riwayat Pengeluaran</Text>
+        <View style={styles.filterRow}>
+          <FilterChips
+            label="Periode"
+            options={PERIOD_OPTIONS}
+            value={period}
+            onChange={setPeriod}
+          />
+          <FilterChips
+            label="Kategori"
+            options={categoryOptions}
+            value={filterCategory}
+            onChange={setFilterCategory}
+          />
+          <FilterChips
+            label="Status"
+            options={STATUS_OPTIONS}
+            value={filterStatus}
+            onChange={setFilterStatus}
+          />
+        </View>
+
+        <Text style={styles.sectionTitle}>Catatan pengeluaran</Text>
+        <Text style={styles.sectionHint}>
+          Perubahan nominal dan pembatalan wajib disertai alasan.
+        </Text>
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator size="large" color={colors.light.primary} />
           </View>
         ) : expenses.length === 0 ? (
-          <EmptyState icon={<Text style={styles.icon}>💰</Text>} title="Belum ada data" subtitle="Pengeluaran akan muncul di sini." />
+          <EmptyState
+            title="Belum ada data"
+            subtitle="Pengeluaran akan muncul di sini."
+          />
+        ) : filteredExpenses.length === 0 ? (
+          <EmptyState
+            title="Tidak ada catatan"
+            subtitle="Tidak ada pengeluaran yang cocok dengan filter."
+          />
+        ) : isTablet ? (
+          <Card style={styles.tableCard}>
+            <View style={[styles.tr, styles.thead]}>
+              <Text style={[styles.th, styles.colDate]}>Tanggal</Text>
+              <Text style={[styles.th, styles.colCategory]}>Kategori</Text>
+              <Text style={[styles.th, styles.colDescription]}>Keterangan</Text>
+              <Text style={[styles.th, styles.colAmount]}>Nominal</Text>
+              <Text style={[styles.th, styles.colStatus]}>Status</Text>
+              <Text style={[styles.th, styles.colAction]} />
+            </View>
+            {filteredExpenses.map((expense) => (
+              <Pressable
+                key={expense.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Buka detail pengeluaran ${expense.description || expense.id}`}
+                onPress={() => setDetail(expense)}
+                style={({ pressed }) => [styles.tr, pressed && styles.rowPressed]}
+              >
+                <Text style={[styles.td, styles.colDate]}>
+                  {(expense.expenseDate || '').slice(0, 10)}
+                </Text>
+                <Text
+                  style={[styles.td, styles.colCategory]}
+                  numberOfLines={1}
+                >
+                  {expense.category?.name || '-'}
+                </Text>
+                <Text
+                  style={[styles.td, styles.colDescription]}
+                  numberOfLines={1}
+                >
+                  {expense.description || 'Tanpa keterangan'}
+                </Text>
+                <Text style={[styles.td, styles.colAmount]}>
+                  Rp {formatRupiah(expense.amount)}
+                </Text>
+                <View style={styles.colStatus}>
+                  <Badge
+                    label={expenseState(expense)}
+                    variant={STATE_VARIANT[expenseState(expense)]}
+                  />
+                </View>
+                <View style={styles.colAction}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => openAudit(expense)}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.auditLink}>Audit</Text>
+                  </Pressable>
+                </View>
+              </Pressable>
+            ))}
+          </Card>
         ) : (
-          expenses.map((expense) => (
+          filteredExpenses.map((expense) => (
             <Card key={expense.id} style={styles.expenseCard}>
               <View style={styles.rowBetween}>
                 <Text style={styles.expenseTitle}>{expense.description || 'Tanpa keterangan'}</Text>
                 <Badge
-                  label={expense.status === 'ACTIVE' ? '✓ Aktif' : '✗ Batal'}
-                  variant={expense.status === 'ACTIVE' ? 'success' : 'danger'}
+                  label={expenseState(expense)}
+                  variant={STATE_VARIANT[expenseState(expense)]}
                 />
               </View>
               <Text style={styles.expenseMeta}>
                 Rp {formatRupiah(expense.amount)} · {expense.category?.name || '-'} · {(expense.expenseDate || '').slice(0, 10)}
               </Text>
               <View style={styles.rowActions}>
+                <TouchableOpacity style={styles.action} onPress={() => setDetail(expense)}>
+                  <Text style={styles.actionText}>Detail</Text>
+                </TouchableOpacity>
                 {canManageExpenses && expense.status === 'ACTIVE' && (
                   <TouchableOpacity style={styles.action} onPress={() => openEdit(expense)}>
                     <Text style={styles.actionText}>Koreksi</Text>
@@ -287,6 +530,18 @@ export default function ExpensesScreen() {
             </Card>
           ))
         )}
+
+        {canManageExpenses ? (
+          <BaseButton
+            label="Tambah pengeluaran"
+            size="lg"
+            fullWidth
+            onPress={() => {
+              setError(null);
+              setModal('create');
+            }}
+          />
+        ) : null}
       </ScrollView>
 
       <Modal
@@ -316,6 +571,196 @@ export default function ExpensesScreen() {
           {error && <Notice message={error} type="error" />}
           <Input label="Alasan" value={cancelReason} onChangeText={setCancelReason} placeholder="Contoh: input ganda" />
         </View>
+      </Modal>
+
+      <Modal
+        visible={modal === 'success'}
+        onClose={() => {
+          setModal(null);
+          setSuccessState(null);
+        }}
+        title={successState?.title || 'Berhasil'}
+        footer={
+          <BaseButton
+            label="Tutup"
+            variant="secondary"
+            size="lg"
+            fullWidth
+            onPress={() => {
+              setModal(null);
+              setSuccessState(null);
+            }}
+          />
+        }
+      >
+        <View style={styles.modalContent}>
+          <Text style={styles.successText}>
+            {successState?.message || 'Tindakan berhasil disimpan.'}
+          </Text>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={modal === 'create'}
+        onClose={() => setModal(null)}
+        title="Catat Pengeluaran"
+        subtitle="Catatan pengeluaran outlet dan jejak koreksinya."
+        footer={
+          <BaseButton
+            label="Simpan Pengeluaran"
+            onPress={handleCreate}
+            loading={submitting}
+            fullWidth
+            size="lg"
+          />
+        }
+      >
+        <View style={styles.modalContent}>
+          {error ? <Notice message={error} type="error" /> : null}
+          <Text style={styles.label}>Kategori</Text>
+          <View style={styles.chipRow}>
+            {Array.isArray(categories) && categories.length > 0 ? (
+              categories.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.chip, categoryId === item.id && styles.chipActive]}
+                  onPress={() => setCategoryId(item.id)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      categoryId === item.id && styles.chipTextActive,
+                    ]}
+                  >
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <Text style={styles.emptyCategoriesText}>
+                Tidak ada kategori tersedia
+              </Text>
+            )}
+          </View>
+          <Input
+            label="Jumlah (Rp)"
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="0"
+            keyboardType="numeric"
+          />
+          <Input
+            label="Tanggal"
+            value={date}
+            onChangeText={setDate}
+            placeholder="YYYY-MM-DD"
+            keyboardType="numeric"
+          />
+          <Input
+            label="Deskripsi"
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Keterangan pengeluaran"
+          />
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(detail)}
+        onClose={() => setDetail(null)}
+        title="Detail pengeluaran"
+        subtitle="Rincian catatan biaya outlet."
+        footer={
+          <View style={styles.modalFooter}>
+            {canManageExpenses && detail?.status === 'ACTIVE' ? (
+              <>
+                <BaseButton
+                  label="Koreksi catatan"
+                  variant="secondary"
+                  size="lg"
+                  fullWidth
+                  onPress={() => {
+                    const current = detail;
+                    setDetail(null);
+                    openEdit(current);
+                  }}
+                />
+                <BaseButton
+                  label="Batalkan pengeluaran"
+                  variant="danger"
+                  size="lg"
+                  fullWidth
+                  onPress={() => {
+                    const current = detail;
+                    setDetail(null);
+                    openCancel(current);
+                  }}
+                />
+                <Text style={styles.modalHint}>
+                  Koreksi dan pembatalan wajib disertai alasan.
+                </Text>
+              </>
+            ) : (
+              <BaseButton
+                label="Tutup"
+                variant="secondary"
+                size="lg"
+                fullWidth
+                onPress={() => setDetail(null)}
+              />
+            )}
+          </View>
+        }
+      >
+        {detail ? (
+          <View style={styles.detailContent}>
+            <View style={styles.rowBetween}>
+              <Badge
+                label={detail.status === 'ACTIVE' ? 'Aktif' : 'Dibatalkan'}
+                variant={detail.status === 'ACTIVE' ? 'success' : 'danger'}
+              />
+              <Text style={styles.modalText}>{formatDateTime(detail.createdAt)}</Text>
+            </View>
+            <Text style={styles.detailId}>ID: {detail.id}</Text>
+
+            <Text style={styles.detailLabel}>Nominal pengeluaran</Text>
+            <Text style={styles.detailAmount}>Rp {formatRupiah(detail.amount)}</Text>
+
+            <Text style={styles.detailSection}>Informasi pengeluaran</Text>
+            <DetailRow label="Kategori" value={detail.category?.name || '-'} />
+            <DetailRow label="Keterangan" value={detail.description || '-'} />
+            <DetailRow label="Dicatat oleh" value={detail.createdBy?.name || '-'} />
+            <DetailRow
+              label="Tanggal pengeluaran"
+              value={formatDateTime(detail.expenseDate)}
+            />
+
+            <Text style={styles.detailSection}>Riwayat perubahan</Text>
+            {(detail.audits ?? []).length === 0 ? (
+              <Text style={styles.modalText}>
+                Belum ada koreksi atau pembatalan.
+              </Text>
+            ) : (
+              detail.audits.map((row) => (
+                <View key={row.id} style={styles.auditRow}>
+                  <Text style={styles.auditAction}>
+                    {row.action === 'CORRECTED'
+                      ? 'Koreksi'
+                      : row.action === 'CANCELLED'
+                        ? 'Pembatalan'
+                        : row.action}
+                  </Text>
+                  <Text style={styles.modalText}>
+                    {row.actor?.name || '-'} · {formatDateTime(row.createdAt)}
+                  </Text>
+                  {row.reason ? (
+                    <Text style={styles.modalText}>Alasan: {row.reason}</Text>
+                  ) : null}
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
       </Modal>
 
       <Modal
@@ -357,7 +802,100 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.base,
     color: colors.light.textSecondary,
   },
-  formCard: { gap: spacing.md },
+  sectionHint: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  summaryCard: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    padding: spacing.md,
+    gap: 2,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.light.border,
+    backgroundColor: colors.light.surface,
+  },
+  summaryLabel: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+  },
+  summaryValue: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.base,
+    color: colors.light.textSecondary,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  filterGroup: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 180,
+    gap: spacing.xs,
+  },
+  filterLabel: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    textTransform: 'uppercase',
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  tableCard: { padding: 0, overflow: 'hidden' },
+  tr: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.light.divider,
+  },
+  thead: {
+    backgroundColor: colors.light.surfaceSecondary,
+  },
+  th: {
+    ...typography.fontFamily.semibold,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+  },
+  td: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+  },
+  colDate: { flex: 0.9 },
+  colCategory: { flex: 1 },
+  colDescription: { flex: 1.6 },
+  colAmount: { flex: 1, textAlign: 'right' },
+  colStatus: { width: 96 },
+  colAction: { width: 48, alignItems: 'flex-end' },
+  auditLink: {
+    ...typography.fontFamily.semibold,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.primary,
+  },
+  rowPressed: { opacity: 0.72 },
   sectionTitle: {
     ...typography.fontFamily.medium,
     ...typography.weights.semibold,
@@ -389,7 +927,6 @@ const styles = StyleSheet.create({
   },
   chipTextActive: { color: colors.light.onPrimary },
   loading: { padding: spacing.xl, alignItems: 'center' },
-  icon: { fontSize: 40 },
   expenseCard: { gap: spacing.sm },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   expenseTitle: {
@@ -444,5 +981,66 @@ const styles = StyleSheet.create({
     color: colors.light.textSecondary,
     fontStyle: 'italic',
     paddingVertical: spacing.xs,
+  },
+  modalFooter: { gap: spacing.sm },
+  successText: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+    lineHeight: 20,
+  },
+  modalHint: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    textAlign: 'center',
+  },
+  detailContent: { padding: spacing.md, gap: spacing.sm },
+  detailId: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+  },
+  detailLabel: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    textTransform: 'uppercase',
+    marginTop: spacing.xs,
+  },
+  detailAmount: {
+    ...typography.fontFamily.bold,
+    ...typography.weights.bold,
+    fontSize: typography.sizes.xxl,
+    color: colors.light.textPrimary,
+  },
+  detailSection: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+    marginTop: spacing.md,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.light.divider,
+  },
+  detailRowLabel: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textSecondary,
+  },
+  detailRowValue: {
+    ...typography.fontFamily.medium,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+    flex: 1,
+    textAlign: 'right',
   },
 });

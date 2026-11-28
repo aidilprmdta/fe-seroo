@@ -10,14 +10,15 @@ let BarlowCondensed_700Bold_Italic = null;
 
 try {
   useExpoFonts = require('expo-font').useFonts;
-  const inter = require('@expo-google-fonts/inter');
-  Inter_400Regular = inter.Inter_400Regular;
-  Inter_500Medium = inter.Inter_500Medium;
-  Inter_600SemiBold = inter.Inter_600SemiBold;
-  Inter_700Bold = inter.Inter_700Bold;
-  const barlow = require('@expo-google-fonts/barlow-condensed');
-  BarlowCondensed_700Bold = barlow.BarlowCondensed_700Bold;
-  BarlowCondensed_700Bold_Italic = barlow.BarlowCondensed_700Bold_Italic;
+  // Impor per berat font, bukan index paket: index menarik seluruh 18 varian TTF ke bundle.
+  Inter_400Regular = require('@expo-google-fonts/inter/400Regular').Inter_400Regular;
+  Inter_500Medium = require('@expo-google-fonts/inter/500Medium').Inter_500Medium;
+  Inter_600SemiBold = require('@expo-google-fonts/inter/600SemiBold').Inter_600SemiBold;
+  Inter_700Bold = require('@expo-google-fonts/inter/700Bold').Inter_700Bold;
+  BarlowCondensed_700Bold =
+    require('@expo-google-fonts/barlow-condensed/700Bold').BarlowCondensed_700Bold;
+  BarlowCondensed_700Bold_Italic =
+    require('@expo-google-fonts/barlow-condensed/700Bold_Italic').BarlowCondensed_700Bold_Italic;
 } catch {
   // Font packages optional / fallback ke system font
 }

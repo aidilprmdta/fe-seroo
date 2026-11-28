@@ -1,7 +1,8 @@
 // CrewCancelRequestScreen — Ajukan pembatalan pesanan (terpisah dari riwayat)
 // Figma: 13 · Ajukan pembatalan · Tablet · Prototype
-import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createOrdersApi } from '../../src/api/orders';
 import { createApiClient, createApiRequestWrapper } from '../../src/api/api';
@@ -20,8 +21,8 @@ function formatRupiah(value) {
   return Number(value).toLocaleString('id-ID');
 }
 
-export default function CrewCancelRequestScreen({ route }) {
-  const { id: orderId } = route.params || {};
+export default function CrewCancelRequestScreen() {
+  const { id: orderId } = useLocalSearchParams();
   const { selection, apiRequest } = useAuth();
   const outletId = selection?.activeOutletId;
 

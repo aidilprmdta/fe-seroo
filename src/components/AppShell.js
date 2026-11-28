@@ -3,6 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import ScreenFrame from './ScreenFrame';
+import FadeIn from './FadeIn';
 import AccountActions from './AccountActions';
 import { useAuth } from '../auth/AuthContext';
 import { createApiRequestWrapper } from '../api/api';
@@ -35,19 +36,25 @@ export const NAV = {
   manager: {
     phone: [
       { key: 'beranda', label: 'Beranda', icon: '⌂', route: '/manager/dashboard' },
+      { key: 'transaksi', label: 'Transaksi', icon: '≡', route: '/manager/transactions' },
       { key: 'stok', label: 'Stok', icon: '▦', route: '/inventory' },
       { key: 'biaya', label: 'Biaya', icon: 'Rp', route: '/expenses' },
       { key: 'closing', label: 'Closing', icon: '✓', route: '/closings' },
+      { key: 'selisih', label: 'Selisih kas', icon: '!', route: '/manager/cash-difference' },
+      { key: 'aktivitas', label: 'Aktivitas', icon: '◷', route: '/manager/audit' },
       { key: 'laporan', label: 'Laporan', icon: '≡', route: '/reports' },
       { key: 'waste', label: 'Waste', icon: '!', route: '/waste' },
     ],
     tablet: [
       { key: 'beranda', label: 'Beranda', icon: '⌂', route: '/manager/dashboard' },
+      { key: 'transaksi', label: 'Transaksi', icon: '≡', route: '/manager/transactions' },
       { key: 'menu', label: 'Menu outlet', icon: '▦', route: '/admin/catalog' },
       { key: 'stok', label: 'Inventaris', icon: '○', route: '/inventory' },
       { key: 'waste', label: 'Waste / kehilangan', icon: '!', route: '/waste' },
       { key: 'biaya', label: 'Pengeluaran', icon: 'Rp', route: '/expenses' },
       { key: 'closing', label: 'Closing', icon: '✓', route: '/closings' },
+      { key: 'selisih', label: 'Selisih kas', icon: '!', route: '/manager/cash-difference' },
+      { key: 'aktivitas', label: 'Aktivitas', icon: '◷', route: '/manager/audit' },
       { key: 'laporan', label: 'Laporan', icon: '≡', route: '/reports' },
       { key: 'permintaan', label: 'Permintaan stok', icon: '↗', route: '/stock-requests' },
       { key: 'profil', label: 'Profil', icon: '◉', route: '/profile' },
@@ -221,7 +228,7 @@ export default function AppShell({
             </View>
           </View>
 
-          <View style={styles.tabletMain}>
+          <FadeIn style={styles.tabletMain}>
             <View style={styles.topbar}>
               <Text style={styles.breadcrumb}>
                 {(roleLabel || 'Seroo').toLowerCase()}  /  {title || 'Beranda'}
@@ -244,10 +251,10 @@ export default function AppShell({
               <View style={{ height: spacing.xl }} />
               <AccountActions />
             </ScrollView>
-          </View>
+          </FadeIn>
         </View>
       ) : (
-        <View style={styles.phoneRoot}>
+        <FadeIn style={styles.phoneRoot}>
           <ScrollView
             style={styles.phoneScroll}
             contentContainerStyle={[styles.phoneContent, contentStyle]}
@@ -288,7 +295,7 @@ export default function AppShell({
           </ScrollView>
 
           <View style={styles.bottomNav}>{items.map((item) => renderNavItem(item))}</View>
-        </View>
+        </FadeIn>
       )}
     </ScreenFrame>
   );

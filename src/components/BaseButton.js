@@ -2,6 +2,7 @@
 // BaseButton — reusable button with variants, loading, disabled
 import React from 'react';
 import {
+  Animated,
   Pressable,
   Text,
   StyleSheet,
@@ -59,6 +60,15 @@ export default function BaseButton({
 }) {
   const buttonSize = sizes[size] ?? sizes.md;
 
+  const scale = React.useRef(new Animated.Value(1)).current;
+  const animatePress = (toValue) =>
+    Animated.spring(scale, {
+      toValue,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: toValue === 1 ? 6 : 0,
+    }).start();
+
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
 
@@ -76,16 +86,21 @@ export default function BaseButton({
     variantStyles[variant]?.(styles) ?? null;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{
-        disabled: disabled || loading,
-        busy: loading,
-      }}
-      disabled={disabled || loading}
-      onPress={onPress}
-      style={({ pressed }) => [
+    <Animated.View
+      style={[fullWidth && styles.fullWidth, { transform: [{ scale }] }]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? label}
+        accessibilityState={{
+          disabled: disabled || loading,
+          busy: loading,
+        }}
+        disabled={disabled || loading}
+        onPress={onPress}
+        onPressIn={() => animatePress(0.97)}
+        onPressOut={() => animatePress(1)}
+        style={({ pressed }) => [
         styles.button,
 
         fullWidth && styles.fullWidth,
@@ -147,7 +162,8 @@ export default function BaseButton({
           )}
         </>
       )}
-    </Pressable>
+      </Pressable>
+    </Animated.View>
   );
 }
 

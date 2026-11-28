@@ -7,11 +7,15 @@ export const ROUTES = {
   crewPos: "/crew/pos",
   crewOrders: "/crew/orders",
   crewShopeeFood: "/crew/shopee-food",
+  crewShiftHandover: "/crew/shift-handover",
   crewReceiptPreview: "/crew/receipt-preview",
   crewQrisVerify: "/crew/qris-verify",
   crewTransactionDetail: "/crew/transaction-detail",
   crewCancelRequest: "/crew/cancel-request",
   manager: "/manager/dashboard",
+  managerTransactions: "/manager/transactions",
+  managerCashDifference: "/manager/cash-difference",
+  managerAudit: "/manager/audit",
   managerAvailability: "/manager/availability",
   managerShiftHandover: "/manager/shift-handover",
   owner: "/owner/dashboard",
@@ -145,6 +149,23 @@ export function isAllowedRoute(pathname, memberships, context) {
       membership.role === context?.activeRole
     );
   }
+
+  const crewScreenRoutes = [
+    ROUTES.crewQrisVerify,
+    ROUTES.crewReceiptPreview,
+    ROUTES.crewTransactionDetail,
+    ROUTES.crewCancelRequest,
+    ROUTES.crewShiftHandover,
+  ];
+  if (crewScreenRoutes.includes(pathname)) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      membership?.role === "CREW" && membership.role === context?.activeRole
+    );
+  }
   if (pathname === ROUTES.waste) {
     const membership = getSelectedMembership(
       memberships,
@@ -206,6 +227,36 @@ export function isAllowedRoute(pathname, memberships, context) {
         membership?.role === "OWNER_MITRA" ||
         membership?.role === "ADMIN_PUSAT") &&
       membership.role === context?.activeRole
+    );
+  }
+
+  if (pathname === ROUTES.managerTransactions) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      membership?.role === "MANAGER" && membership.role === context?.activeRole
+    );
+  }
+
+  if (pathname === ROUTES.managerCashDifference) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      membership?.role === "MANAGER" && membership.role === context?.activeRole
+    );
+  }
+
+  if (pathname === ROUTES.managerAudit) {
+    const membership = getSelectedMembership(
+      memberships,
+      context?.activeOutletId,
+    );
+    return (
+      membership?.role === "MANAGER" && membership.role === context?.activeRole
     );
   }
 

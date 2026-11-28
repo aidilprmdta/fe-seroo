@@ -1,6 +1,8 @@
 // Modal — bottom sheet responsif (full-width di HP, sheet terpusat di tablet)
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   View,
   Text,
   StyleSheet,
@@ -23,18 +25,52 @@ export default function Modal({
   maxHeight,
 }) {
   const r = useResponsive();
-  if (!visible) return null;
+  const progress = useRef(new Animated.Value(0)).current;
+  const [rendered, setRendered] = useState(Boolean(visible));
+
+  useEffect(() => {
+    if (visible) setRendered(true);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!rendered) return undefined;
+    const animation = Animated.timing(progress, {
+      toValue: visible ? 1 : 0,
+      duration: visible ? 180 : 140,
+      easing: visible ? Easing.out(Easing.quad) : Easing.in(Easing.quad),
+      useNativeDriver: true,
+    });
+    animation.start(({ finished }) => {
+      if (finished && !visible) setRendered(false);
+    });
+    return () => animation.stop();
+  }, [progress, rendered, visible]);
+
+  if (!rendered) return null;
 
   const sheetWidth = width ?? r.modalWidth;
   const sheetMaxHeight = maxHeight ?? r.modalMaxHeight;
+  const sheetOffset = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [16, 0],
+  });
 
   return (
-    <View style={styles.overlay}>
+    <Animated.View
+      pointerEvents={visible ? 'auto' : 'none'}
+      style={[styles.overlay, { opacity: progress }]}
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <View style={[styles.modal, { width: sheetWidth, maxHeight: sheetMaxHeight }]}>
+        <Animated.View
+          style={[
+            styles.modal,
+            { width: sheetWidth, maxHeight: sheetMaxHeight },
+            { transform: [{ translateY: sheetOffset }] },
+          ]}
+        >
           {title ? (
             <View style={styles.header}>
               <Text style={[styles.title, { fontSize: r.titleSize - 2 }]} numberOfLines={1}>
@@ -62,9 +98,9 @@ export default function Modal({
           </ScrollView>
 
           {footer ? <View style={styles.footer}>{footer}</View> : null}
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
-    </View>
+    </Animated.View>
   );
 }
 

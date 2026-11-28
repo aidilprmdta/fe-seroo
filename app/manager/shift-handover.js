@@ -1,7 +1,7 @@
 // ManagerShiftHandoverScreen — Terima & konfirmasi serah terima shift (Manager)
 // Figma: 17 · Manager · Terima serah terima · Tablet · Prototype
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable, Alert } from 'react-native';
 import { useAuth } from '../../src/auth/AuthContext';
 import { createShiftHandoverApi } from '../../src/shift-handover/api';
 import { createApiRequestWrapper } from '../../src/api/api';
@@ -9,8 +9,8 @@ import { colors, spacing, typography, radii } from '../../src/theme/tokens';
 import Card from '../../src/components/Card';
 import Input from '../../src/components/Input';
 import BaseButton from '../../src/components/BaseButton';
+import Badge from '../../src/components/Badge';
 import EmptyState from '../../src/components/EmptyState';
-import ScreenFrame from '../../src/components/ScreenFrame';
 import AppShell from '../../src/components/AppShell';
 import Notice from '../../src/components/Notice';
 
@@ -25,6 +25,7 @@ export default function ManagerShiftHandoverScreen() {
   const [error, setError] = useState(null);
   const [confirmed, setConfirmed] = useState(false);
   const [notes, setNotes] = useState('');
+  const [checks, setChecks] = useState({ cash: false, orders: false, notes: false });
 
   const loadPending = useCallback(async () => {
     if (!outletId) return;
@@ -46,6 +47,20 @@ export default function ManagerShiftHandoverScreen() {
   }, [loadPending]);
 
   const selected = pending.find((item) => item.id === selectedId) ?? null;
+  const outletLabel =
+    (user?.memberships ?? []).find((membership) => membership.outletId === outletId)
+      ?.outletName ?? "Outlet";
+
+  const checklist = [
+    { key: 'cash', label: 'Kas fisik sudah diperiksa' },
+    { key: 'orders', label: 'Pesanan dan kondisi stok ditinjau' },
+    { key: 'notes', label: 'Catatan shift sudah dibaca' },
+  ];
+  const allChecked = checklist.every((item) => checks[item.key]);
+
+  useEffect(() => {
+    setChecks({ cash: false, orders: false, notes: false });
+  }, [selectedId]);
 
   const handleDecide = async (status) => {
     if (!selected) {
@@ -81,8 +96,8 @@ export default function ManagerShiftHandoverScreen() {
         title="Serah Terima Berhasil"
         subtitle="Serah terima shift telah dikonfirmasi."
         roleLabel="MANAGER · OUTLET"
-        outletLabel={outletId || 'Outlet'}
-        scopeLabel={outletId || 'Outlet'}
+        outletLabel={outletLabel}
+        scopeLabel={outletLabel}
         contentStyle={styles.container}
       >
         <Card style={styles.successCard}>
@@ -105,122 +120,216 @@ export default function ManagerShiftHandoverScreen() {
       title="Terima Serah Terima"
       subtitle="Konfirmasi & verifikasi serah terima shift crew."
       roleLabel="MANAGER · OUTLET"
-      outletLabel={outletId || 'Outlet'}
-      scopeLabel={outletId || 'Outlet'}
+      outletLabel={outletLabel}
+      scopeLabel={outletLabel}
       contentStyle={styles.container}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {error && <Notice message={error} type="error" />}
+      {error && <Notice message={error} type="error" />}
 
-        {loading ? (
-          <Text style={styles.hint}>Memuat permintaan serah terima...</Text>
-        ) : pending.length === 0 ? (
-          <EmptyState
-            title="Tidak ada permintaan"
-            description="Belum ada permintaan serah terima shift yang menunggu konfirmasi."
-          />
-        ) : (
-          <Card style={styles.formCard}>
+      {loading ? (
+        <Text style={styles.hint}>Memuat permintaan serah terima...</Text>
+      ) : pending.length === 0 ? (
+        <EmptyState
+          title="Tidak ada permintaan"
+          subtitle="Belum ada permintaan serah terima shift yang menunggu konfirmasi."
+        />
+      ) : (
+        <View style={styles.stack}>
+          <Card style={styles.card}>
             <Text style={styles.sectionTitle}>Permintaan menunggu konfirmasi</Text>
             {pending.map((item) => (
               <TouchableOpacity
                 key={item.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: selectedId === item.id }}
                 style={[styles.requestRow, selectedId === item.id && styles.requestRowActive]}
                 onPress={() => setSelectedId(item.id)}
               >
-                <Text style={styles.requestTitle}>{item.crewName || 'Crew'}</Text>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.requestTitle}>{item.crewName || 'Crew'}</Text>
+                  <Badge label={item.status || 'PENDING'} variant="warning" size="sm" />
+                </View>
                 <Text style={styles.hint}>
                   {item.currentOutlet} → {item.nextOutlet}
-                  {item.summary ? ` · ${item.summary}` : ''}
-                  {item.cashHandover ? ` · Kas: ${item.cashHandover}` : ''}
-                  {item.notes ? ` · ${item.notes}` : ''}
                 </Text>
               </TouchableOpacity>
             ))}
           </Card>
-        )}
+        </View>
+      )}
 
-        {selected && (
-          <Card style={styles.formCard}>
+      {selected && (
+        <View style={[styles.stack, styles.stackSpaced]}>
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>Serah terima shift</Text>
+            <Text style={styles.value}>
+              {selected.currentOutlet} → {selected.nextOutlet}
+            </Text>
+            <Text style={styles.meta}>
+              Diserahkan oleh {selected.crewName || 'Crew'}
+            </Text>
+            {selected.summary ? (
+              <Text style={styles.body}>{selected.summary}</Text>
+            ) : null}
+          </Card>
+
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>Pemeriksaan kas</Text>
+            <Text style={styles.body}>
+              {selected.cashHandover ||
+                'Crew belum mencatat jumlah kas pada serah terima ini.'}
+            </Text>
+            <Text style={styles.meta}>
+              Nominal kas sistem dan kas fisik diverifikasi pada proses closing
+              harian.
+            </Text>
+          </Card>
+
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>Catatan crew</Text>
+            <Text style={styles.body}>
+              {selected.notes || 'Catatan operasional akan ditampilkan di sini.'}
+            </Text>
+          </Card>
+
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>Konfirmasi penerimaan</Text>
+            {checklist.map((item) => (
+              <Pressable
+                key={item.key}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: checks[item.key] }}
+                onPress={() =>
+                  setChecks((current) => ({
+                    ...current,
+                    [item.key]: !current[item.key],
+                  }))
+                }
+                style={styles.checkRow}
+              >
+                <View style={[styles.checkBox, checks[item.key] && styles.checkBoxOn]}>
+                  {checks[item.key] ? <Text style={styles.checkMark}>✓</Text> : null}
+                </View>
+                <Text style={styles.checkLabel}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </Card>
+
+          <View style={styles.notesWrap}>
             <Text style={styles.sectionTitle}>Catatan konfirmasi</Text>
             <Input
               value={notes}
               onChangeText={setNotes}
               placeholder="Catatan untuk crew (opsional)"
-              multiline
-              numberOfLines={3}
-            />
-          </Card>
-        )}
-
-        {selected && (
-          <View style={styles.actionRow}>
-            <BaseButton
-              label="Tolak"
-              onPress={() => handleDecide('REJECTED')}
-              variant="secondary"
-              size="lg"
-              loading={saving}
-              disabled={saving}
-              style={styles.actionButton}
-            />
-            <BaseButton
-              label="Konfirmasi"
-              onPress={() => handleDecide('ACCEPTED')}
-              size="lg"
-              loading={saving}
-              disabled={saving}
-              style={styles.actionButton}
             />
           </View>
-        )}
 
-        <Text style={styles.safeguard}>
-          ⚠️ Pastikan kas dan serah terima sudah sesuai sebelum mengkonfirmasi.
-        </Text>
-      </ScrollView>
+          <BaseButton
+            label="Konfirmasi Penerimaan"
+            onPress={() => handleDecide('ACCEPTED')}
+            size="lg"
+            fullWidth
+            loading={saving}
+            disabled={saving || !allChecked}
+          />
+          {!allChecked ? (
+            <Text style={styles.hint}>
+              Centang ketiga pemeriksaan sebelum mengonfirmasi.
+            </Text>
+          ) : null}
+          <BaseButton
+            label="Tolak serah terima"
+            onPress={() => handleDecide('REJECTED')}
+            variant="secondary"
+            size="lg"
+            fullWidth
+            disabled={saving}
+          />
+          <Text style={styles.footnote}>
+            Konfirmasi penerimaan tidak otomatis mengubah saldo kas.
+          </Text>
+        </View>
+      )}
     </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
   container: { padding: spacing.lg },
-  scrollContent: { paddingBottom: spacing.lg },
-  formCard: { gap: spacing.md, marginBottom: spacing.lg },
+  stack: { gap: spacing.md },
+  stackSpaced: { marginTop: spacing.md },
+  card: { gap: spacing.xs },
   sectionTitle: {
     ...typography.fontFamily.medium,
     ...typography.weights.semibold,
     fontSize: typography.sizes.sm,
     color: colors.light.textSecondary,
-    marginTop: spacing.md,
   },
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  label: {
-    ...typography.fontFamily.medium,
-    fontSize: typography.sizes.sm,
-    color: colors.light.textPrimary,
-  },
   hint: {
     ...typography.fontFamily.regular,
     fontSize: typography.sizes.xs,
     color: colors.light.textSecondary,
   },
-  saveButton: {
-    backgroundColor: colors.light.primary,
+  value: {
+    ...typography.fontFamily.semibold,
+    ...typography.weights.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.light.textPrimary,
   },
-  actionRow: {
+  meta: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+  },
+  body: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
+    marginTop: spacing.xs,
+  },
+  checkRow: {
     flexDirection: 'row',
-    gap: spacing.md,
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 44,
   },
-  actionButton: {
+  checkBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.light.borderMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkBoxOn: {
+    backgroundColor: colors.light.primary,
+    borderColor: colors.light.primary,
+  },
+  checkMark: {
+    color: colors.light.onPrimary,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  checkLabel: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.sm,
+    color: colors.light.textPrimary,
     flex: 1,
+  },
+  notesWrap: {
+    gap: spacing.xs,
+  },
+  footnote: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    textAlign: 'center',
   },
   requestRow: {
     borderWidth: 1,
@@ -237,13 +346,6 @@ const styles = StyleSheet.create({
     ...typography.fontFamily.semibold,
     fontSize: typography.sizes.base,
     color: colors.light.textPrimary,
-  },
-  safeguard: {
-    ...typography.fontFamily.regular,
-    fontSize: typography.sizes.sm,
-    color: colors.light.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.md,
   },
   successCard: {
     gap: spacing.sm,

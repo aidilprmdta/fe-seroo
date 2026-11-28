@@ -69,6 +69,11 @@ function GuardedStack() {
             <Stack.Screen name="crew" />
             <Stack.Screen name="crew/pos" />
             <Stack.Screen name="crew/orders" />
+            <Stack.Screen name="crew/qris-verify" />
+            <Stack.Screen name="crew/receipt-preview" />
+            <Stack.Screen name="crew/transaction-detail" />
+            <Stack.Screen name="crew/cancel-request" />
+            <Stack.Screen name="crew/shift-handover" />
           </Stack.Protected>
 
           <Stack.Protected
@@ -116,6 +121,9 @@ function GuardedStack() {
             redirectTo={landingRoute}
           >
             <Stack.Screen name="manager/dashboard" />
+            <Stack.Screen name="manager/transactions" />
+            <Stack.Screen name="manager/cash-difference" />
+            <Stack.Screen name="manager/audit" />
             <Stack.Screen name="manager/availability" />
           </Stack.Protected>
 

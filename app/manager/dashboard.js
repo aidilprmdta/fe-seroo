@@ -17,6 +17,7 @@ import Notice from "../../src/components/Notice";
 import PrimaryButton from "../../src/components/PrimaryButton";
 import ProfileButton from "../../src/components/ProfileButton";
 import ScreenFrame from "../../src/components/ScreenFrame";
+import FadeIn from "../../src/components/FadeIn";
 import Badge from "../../src/components/Badge";
 import BarChart from "../../src/components/BarChart";
 import { createDashboardApi } from "../../src/dashboard/api";
@@ -31,13 +32,14 @@ function formatRupiah(value) {
   return num.toLocaleString("id-ID");
 }
 
+const TIME_FORMAT = new Intl.DateTimeFormat("id-ID", {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 function formatTime(isoString) {
   if (!isoString) return "-";
-  const dt = new Date(isoString);
-  return dt.toLocaleTimeString("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return TIME_FORMAT.format(new Date(isoString));
 }
 
 export default function ManagerDashboardScreen() {
@@ -192,6 +194,7 @@ export default function ManagerDashboardScreen() {
 
   return (
     <ScreenFrame>
+      <FadeIn style={styles.screen}>
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
@@ -225,64 +228,39 @@ export default function ManagerDashboardScreen() {
         <View style={styles.quickActionBox}>
           <Text style={styles.sectionHeading}>Menu Operasional</Text>
           <View style={styles.actionGrid}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.closings)}
-              style={[styles.actionBtn, styles.actionBtnHighlight]}
-            >
-              <Text style={styles.actionBtnTextHighlight}>
-                🔒 Closing & Reopen
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.reports)}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>📊 Laporan Keuangan</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.inventory)}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>📦 Kelola Stok</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.stockRequests)}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>📝 Permintaan Stok</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.expenses)}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>💸 Pengeluaran</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.waste)}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>🗑️ Catatan Waste</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(ROUTES.lossReports)}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>⚠️ Laporan Kehilangan</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={loadProductAvailability}
-              style={styles.actionBtn}
-            >
-              <Text style={styles.actionBtnText}>📋 Ketersediaan Menu</Text>
-            </Pressable>
+            {[
+              { label: "Closing & Reopen", route: ROUTES.closings, highlight: true },
+              { label: "Laporan Keuangan", route: ROUTES.reports },
+              { label: "Kelola Stok", route: ROUTES.inventory },
+              { label: "Permintaan Stok", route: ROUTES.stockRequests },
+              { label: "Pengeluaran", route: ROUTES.expenses },
+              { label: "Catatan Waste", route: ROUTES.waste },
+              { label: "Laporan Kehilangan", route: ROUTES.lossReports },
+              { label: "Ketersediaan Menu", onPress: loadProductAvailability },
+            ].map((action) => (
+              <Pressable
+                key={action.label}
+                accessibilityRole="button"
+                onPress={
+                  action.route ? () => router.push(action.route) : action.onPress
+                }
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  action.highlight && styles.actionBtnHighlight,
+                  pressed && styles.actionPressed,
+                ]}
+              >
+                <Text
+                  style={
+                    action.highlight
+                      ? styles.actionBtnTextHighlight
+                      : styles.actionBtnText
+                  }
+                >
+                  {action.label}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         </View>
 
@@ -473,7 +451,7 @@ export default function ManagerDashboardScreen() {
                           {isBusy ? (
                             <ActivityIndicator
                               size="small"
-                              color={prod.isAvailable ? "#C53030" : colors.primary}
+                              color={prod.isAvailable ? colors.danger : colors.primary}
                             />
                           ) : (
                             <Text
@@ -562,7 +540,8 @@ export default function ManagerDashboardScreen() {
                   </Text>
                   {data.sales.qris.pendingReconciliationCount > 0 ? (
                     <Text style={styles.pendingQRISAlert}>
-                      ⚠️ {data.sales.qris.pendingReconciliationCount} tertunda rekonsiliasi
+                      {data.sales.qris.pendingReconciliationCount} transaksi tertunda
+                      rekonsiliasi
                     </Text>
                   ) : null}
                 </View>
@@ -587,7 +566,7 @@ export default function ManagerDashboardScreen() {
               {data.stock.lowStockCount > 0 ? (
                 <View style={styles.lowStockWarningBox}>
                   <Text style={styles.lowStockTitle}>
-                    ⚠️ Peringatan: {data.stock.lowStockCount} bahan perlu pengisian
+                    Peringatan: {data.stock.lowStockCount} bahan perlu pengisian
                     ulang!
                   </Text>
                   <View style={styles.lowStockList}>
@@ -604,7 +583,7 @@ export default function ManagerDashboardScreen() {
               ) : (
                 <View style={styles.safeStockBox}>
                   <Text style={styles.safeStockText}>
-                    ✓ Seluruh stok bahan dalam batas aman.
+                    Seluruh stok bahan dalam batas aman.
                   </Text>
                 </View>
               )}
@@ -667,11 +646,13 @@ export default function ManagerDashboardScreen() {
           </View>
         ) : null}
       </ScrollView>
+      </FadeIn>
     </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   container: {
     padding: spacing.md,
     paddingBottom: spacing.xl,
@@ -741,6 +722,9 @@ const styles = StyleSheet.create({
   actionBtnHighlight: {
     backgroundColor: colors.primary,
   },
+  actionPressed: {
+    opacity: 0.72,
+  },
   actionBtnText: {
     fontSize: 12,
     fontWeight: "600",
@@ -779,16 +763,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   bannerOpen: {
-    backgroundColor: "#FDF5E8",
-    borderColor: "#F4D9A8",
+    backgroundColor: colors.warningSurface,
+    borderColor: colors.warning,
   },
   bannerClosed: {
-    backgroundColor: "#EBF5EE",
-    borderColor: "#BBE1C8",
+    backgroundColor: colors.successSurface,
+    borderColor: colors.success,
   },
   bannerReopened: {
-    backgroundColor: "#FFF9EB",
-    borderColor: "#F3DCAB",
+    backgroundColor: colors.infoSurface,
+    borderColor: colors.info,
   },
   closingBannerTitle: {
     fontSize: 12,
@@ -882,7 +866,7 @@ const styles = StyleSheet.create({
   },
   incomeCard: {
     borderLeftWidth: 4,
-    borderLeftColor: "#2F6B48",
+    borderLeftColor: colors.success,
   },
   expenseCard: {
     borderLeftWidth: 4,
@@ -901,7 +885,7 @@ const styles = StyleSheet.create({
   incomeVal: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#2F6B48",
+    color: colors.success,
   },
   expenseVal: {
     fontSize: 18,
@@ -946,21 +930,21 @@ const styles = StyleSheet.create({
   },
   pendingQRISAlert: {
     fontSize: 10,
-    color: "#A24800",
+    color: colors.danger,
     fontWeight: "600",
     marginTop: 2,
   },
   lowStockWarningBox: {
-    backgroundColor: "#FDF5E8",
+    backgroundColor: colors.warningSurface,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: "#F4D9A8",
+    borderColor: colors.warning,
     padding: spacing.sm,
   },
   lowStockTitle: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#895900",
+    color: colors.textPrimary,
     marginBottom: 6,
   },
   lowStockList: {
@@ -982,13 +966,13 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   safeStockBox: {
-    backgroundColor: "#EBF5EE",
+    backgroundColor: colors.successSurface,
     borderRadius: 6,
     padding: spacing.sm,
   },
   safeStockText: {
     fontSize: 12,
-    color: "#24603B",
+    color: colors.success,
     fontWeight: "500",
   },
   wasteSummaryRow: {
@@ -1117,9 +1101,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   toggleBtnDisable: {
-    backgroundColor: "#FDE8E8",
+    backgroundColor: colors.dangerSurface,
     borderWidth: 1,
-    borderColor: "#F8B4B4",
+    borderColor: colors.danger,
   },
   toggleBtnDisabled: {
     opacity: 0.6,
@@ -1130,7 +1114,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   toggleTextDisable: {
-    color: "#C53030",
+    color: colors.danger,
     fontSize: 11,
     fontWeight: "700",
   },

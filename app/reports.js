@@ -1,5 +1,5 @@
 // ReportsScreen — laporan harian/bulanan + ekspor PDF & Excel asli
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Share, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../src/auth/AuthContext';
@@ -42,6 +42,7 @@ export default function ReportsScreen() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [reportError, setReportError] = useState(null);
+  const [productFilter, setProductFilter] = useState('SEMUA');
 
   const periodLabel = mode === 'MONTHLY' ? monthKey : date;
 
@@ -97,6 +98,10 @@ export default function ReportsScreen() {
     loadReport();
   }, [loadReport]);
 
+  useEffect(() => {
+    setProductFilter('SEMUA');
+  }, [report]);
+
   const summary = report?.summary || {};
   const payment = report?.paymentSummary || {};
   const productSales = Array.isArray(report?.productSales) ? report.productSales : [];
@@ -107,6 +112,51 @@ export default function ReportsScreen() {
     styles.summaryCard,
     { flex: 1, minWidth: r.isSmallPhone ? '100%' : r.isPhone ? 140 : 180 },
   ];
+
+  const totalUnits = productSales.reduce(
+    (sum, item) => sum + Number(item.quantity || 0),
+    0,
+  );
+
+  const productRows = useMemo(() => {
+    const map = new Map();
+    for (const item of productSales) {
+      const name = item.productName || 'Tanpa nama';
+      const variantName = item.variantName || 'Tanpa varian';
+      const row = map.get(name) || {
+        productName: name,
+        variants: {},
+        totalQuantity: 0,
+        addOnQuantity: 0,
+      };
+      row.variants[variantName] =
+        (row.variants[variantName] || 0) + Number(item.quantity || 0);
+      row.totalQuantity += Number(item.quantity || 0);
+      row.addOnQuantity += Number(item.addOnQuantity || 0);
+      map.set(name, row);
+    }
+    return [...map.values()].sort((a, b) => b.totalQuantity - a.totalQuantity);
+  }, [productSales]);
+
+  const variantNames = useMemo(() => {
+    const names = [];
+    for (const item of productSales) {
+      const variantName = item.variantName || 'Tanpa varian';
+      if (!names.includes(variantName)) names.push(variantName);
+    }
+    const rank = { Medium: 0, Large: 1, Regular: 2 };
+    return names.sort(
+      (a, b) => (rank[a] ?? 9) - (rank[b] ?? 9) || a.localeCompare(b),
+    );
+  }, [productSales]);
+
+  const filteredProductRows = useMemo(
+    () =>
+      productFilter === 'SEMUA'
+        ? productRows
+        : productRows.filter((row) => row.productName === productFilter),
+    [productRows, productFilter],
+  );
 
   return (
     <AppShell
@@ -172,6 +222,25 @@ export default function ReportsScreen() {
           <>
             <View style={styles.summary}>
               <Card style={summaryCardStyle}>
+                <Text style={styles.summaryLabel}>Total unit terjual</Text>
+                <Text style={styles.summaryValue}>{totalUnits}</Text>
+              </Card>
+              <Card style={summaryCardStyle}>
+                <Text style={styles.summaryLabel}>Transaksi</Text>
+                <Text style={styles.summaryValue}>{summary.transactionCount ?? 0}</Text>
+              </Card>
+              <Card style={summaryCardStyle}>
+                <Text style={styles.summaryLabel}>Tunai</Text>
+                <Text style={styles.summaryValue}>Rp {formatRupiah(payment.cash?.total)}</Text>
+              </Card>
+              <Card style={summaryCardStyle}>
+                <Text style={styles.summaryLabel}>QRIS</Text>
+                <Text style={styles.summaryValue}>Rp {formatRupiah(payment.qris?.total)}</Text>
+              </Card>
+            </View>
+
+            <View style={styles.summary}>
+              <Card style={summaryCardStyle}>
                 <Text style={styles.summaryLabel}>Total Pendapatan</Text>
                 <Text style={styles.summaryValue}>Rp {formatRupiah(summary.totalIncome)}</Text>
               </Card>
@@ -184,10 +253,6 @@ export default function ReportsScreen() {
                 <Text style={[styles.summaryValue, styles.valuePositive]}>
                   Rp {formatRupiah(summary.netBalance)}
                 </Text>
-              </Card>
-              <Card style={summaryCardStyle}>
-                <Text style={styles.summaryLabel}>Transaksi</Text>
-                <Text style={styles.summaryValue}>{summary.transactionCount ?? 0}</Text>
               </Card>
             </View>
 
@@ -223,22 +288,91 @@ export default function ReportsScreen() {
               </View>
             </Card>
 
-            <Text style={styles.sectionTitle}>Penjualan Produk</Text>
+            <Text style={styles.sectionTitle}>Penjualan per produk</Text>
+            <Text style={styles.sectionHint}>
+              Angka mengikuti transaksi pada periode yang dipilih.
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterChips}
+            >
+              {['SEMUA', ...productRows.map((row) => row.productName)].map((name) => {
+                const active = productFilter === name;
+                return (
+                  <TouchableOpacity
+                    key={name}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    onPress={() => setProductFilter(name)}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                      {name === 'SEMUA' ? 'Semua produk' : name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
             <Card style={styles.tableCard}>
-              <View style={styles.tableHeader}>
-                <Text style={styles.tableHeaderItem}>Produk / Varian</Text>
-                <Text style={styles.tableHeaderItem}>Qty · Total</Text>
-              </View>
-              {productSales.length === 0 ? (
+              {filteredProductRows.length === 0 ? (
                 <Text style={styles.emptyRow}>Tidak ada penjualan.</Text>
+              ) : r.isTablet ? (
+                <>
+                  <View style={styles.tableHeader}>
+                    <Text style={[styles.tableHeaderItem, styles.colProduct]}>Produk</Text>
+                    {variantNames.map((variant) => (
+                      <Text
+                        key={variant}
+                        style={[styles.tableHeaderItem, styles.colVariant]}
+                      >
+                        {variant}
+                      </Text>
+                    ))}
+                    <Text style={[styles.tableHeaderItem, styles.colVariant]}>
+                      Topping
+                    </Text>
+                    <Text style={[styles.tableHeaderItem, styles.colVariant]}>Total</Text>
+                  </View>
+                  {filteredProductRows.map((row) => (
+                    <View key={row.productName} style={styles.tableRow}>
+                      <Text
+                        style={[styles.tableItem, styles.colProduct]}
+                        numberOfLines={1}
+                      >
+                        {row.productName}
+                      </Text>
+                      {variantNames.map((variant) => (
+                        <Text
+                          key={variant}
+                          style={[styles.tableItem, styles.colVariant]}
+                        >
+                          {row.variants[variant] ?? '-'}
+                        </Text>
+                      ))}
+                      <Text style={[styles.tableItem, styles.colVariant]}>
+                        {row.addOnQuantity || '-'}
+                      </Text>
+                      <Text style={[styles.tableItem, styles.colVariant]}>
+                        {row.totalQuantity}
+                      </Text>
+                    </View>
+                  ))}
+                </>
               ) : (
-                productSales.map((item) => (
-                  <View key={`${item.productVariantId}-${item.variantName}`} style={styles.tableRow}>
-                    <Text style={styles.tableItem}>
-                      {item.productName} {item.variantName}
+                filteredProductRows.map((row) => (
+                  <View key={row.productName} style={styles.tableRow}>
+                    <Text style={styles.tableItem} numberOfLines={1}>
+                      {row.productName}
                     </Text>
                     <Text style={styles.tableItem}>
-                      {item.quantity} · Rp {formatRupiah(item.total)}
+                      {variantNames
+                        .filter((variant) => row.variants[variant])
+                        .map((variant) => `${variant} ${row.variants[variant]}`)
+                        .join(' · ')}
+                      {row.addOnQuantity ? ` · Topping ${row.addOnQuantity}` : ''}
+                      {' · Total '}
+                      {row.totalQuantity}
                     </Text>
                   </View>
                 ))
@@ -362,6 +496,19 @@ const styles = StyleSheet.create({
     color: colors.light.textSecondary,
     marginTop: spacing.lg,
   },
+  sectionHint: {
+    ...typography.fontFamily.regular,
+    fontSize: typography.sizes.xs,
+    color: colors.light.textSecondary,
+    marginTop: spacing.xs,
+  },
+  filterChips: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  colProduct: { flex: 1.6 },
+  colVariant: { flex: 1, textAlign: 'right' },
   tableCard: { marginTop: spacing.sm },
   tableHeader: {
     flexDirection: 'row',

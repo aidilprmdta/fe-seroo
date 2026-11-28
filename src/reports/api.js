@@ -69,6 +69,18 @@ export function createReportApi({ request }) {
       const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/reports/export/html${query}`;
       return request(path);
     },
+
+    async exportPdf(outletId, { type = "DAILY", periodKey }) {
+      const query = `?type=${encodeURIComponent(type)}&periodKey=${encodeURIComponent(periodKey)}`;
+      const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/reports/export/pdf${query}`;
+      return request(path);
+    },
+
+    async exportXlsx(outletId, { type = "DAILY", periodKey }) {
+      const query = `?type=${encodeURIComponent(type)}&periodKey=${encodeURIComponent(periodKey)}`;
+      const path = `/api/v1/outlets/${encodeURIComponent(outletId)}/reports/export/xlsx${query}`;
+      return request(path);
+    },
   };
 }
 
